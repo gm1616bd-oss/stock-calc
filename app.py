@@ -1,11 +1,9 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import extra_streamlit_components as stx
-import datetime
 
 # ==========================================
-# 1. 포트폴리오 정의
+# 1. 포트폴리오 정의 (순서 고정)
 # ==========================================
 fixed_portfolio = [
     {"name": "GLDM (금)",    "ticker": "GLDM", "ratio": 0.05, "country": "US"},
@@ -33,25 +31,19 @@ all_stocks = fixed_portfolio + invest_portfolio
 all_names = [item['name'].split()[0] for item in all_stocks] 
 
 # ==========================================
-# 2. 앱 화면 구성 & 자동 저장(쿠키) 설정
+# 2. 앱 화면 구성 & URL 상태 저장
 # ==========================================
-st.set_page_config(page_title="스마트 리밸런싱", page_icon="💾", layout="wide")
-st.title("💾 스마트 리밸런싱 (자동 저장판)")
+st.set_page_config(page_title="스마트 리밸런싱", page_icon="🔖", layout="wide")
+st.title("🔖 스마트 리밸런싱 (자동 기록판)")
 
-# 쿠키 매니저 실행 (중복 에러 방지를 위해 key 명시)
-cookie_manager = stx.CookieManager(key="cookie_manager_main")
-
-# 아이패드에 저장된 이전 기록 읽어오기
-saved_cash = cookie_manager.get("my_cash")
-saved_holdings = cookie_manager.get("my_holdings")
-
-# 저장된 값이 없으면 기본값 세팅
+# 주소창(URL)에 저장된 값 읽어오기
+params = st.query_params
 try:
-    default_cash = int(saved_cash) if saved_cash is not None else 10000000
+    default_cash = int(params.get("cash", "10000000"))
 except:
     default_cash = 10000000
 
-default_holdings = str(saved_holdings) if saved_holdings is not None else ""
+default_holdings = params.get("holdings", "")
 
 # 화면 입력창
 st.subheader("💵 보유 현금 입력")
@@ -86,13 +78,12 @@ def get_real_price(ticker, country):
     except:
         return 0
 
-# 버튼을 누르면 계산과 동시에 아이패드에 저장함
-if st.button("저장 및 분석 실행 🚀", type="primary"):
+# 실행 버튼
+if st.button("분석 실행 및 주소창에 기록 🚀", type="primary"):
     
-    # 🌟 에러 수정 완료: 현금과 수량을 저장할 때 각각 고유한 key를 부여함
-    expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
-    cookie_manager.set("my_cash", str(input_cash), expires_at=expire_date, key="save_cash_key")
-    cookie_manager.set("my_holdings", holdings_input, expires_at=expire_date, key="save_holdings_key")
+    # 🌟 핵심: 버튼 누르는 순간 인터넷 주소창에 내 숫자를 박제함
+    st.query_params["cash"] = str(input_cash)
+    st.query_params["holdings"] = holdings_input
     
     # 입력값 파싱
     try:
@@ -110,7 +101,6 @@ if st.button("저장 및 분석 실행 🚀", type="primary"):
 
     with st.spinner('실시간 데이터 조회 중...'):
         
-        # 환율 조회
         try:
             exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
         except:
@@ -147,16 +137,15 @@ if st.button("저장 및 분석 실행 🚀", type="primary"):
             st.stop()
 
         st.success(f"**📊 총 자산:** {total_asset:,.0f}원 (주식: {current_stock_assets:,.0f}원 + 현금: {input_cash:,.0f}원)")
+        st.info("💡 **팁:** 현재 이 웹페이지 주소(URL)를 북마크하거나 '홈 화면에 추가' 해두시면 다음에도 이 숫자가 그대로 유지됩니다!")
         st.write("---")
 
         # 2. 리밸런싱 계산
         rows = []
         total_buy_cost = 0 
-
         budget_invest = total_asset * 0.60  
 
         for i, p in enumerate(all_stocks):
-            
             cached = stock_data_cache[i]
             price_krw = cached['price_krw']
             price_usd = cached['price_usd']
@@ -183,7 +172,6 @@ if st.button("저장 및 분석 실행 🚀", type="primary"):
             
             actual_target_cost = target_qty * price_krw
             total_buy_cost += actual_target_cost
-
             current_ratio = my_amt / total_asset
 
             diff = target_qty - my_qty
@@ -215,7 +203,6 @@ if st.button("저장 및 분석 실행 🚀", type="primary"):
 
         # 잔여 현금 계산
         remaining_cash = total_asset - total_buy_cost
-        
         cash_target_ratio = 0.20
         current_cash_ratio = input_cash / total_asset
 
