@@ -39,7 +39,7 @@ st.set_page_config(page_title="스마트 리밸런싱", page_icon="💾", layout
 st.title("💾 스마트 리밸런싱 (자동 저장판)")
 
 # 쿠키 매니저 불러오기
-@st.cache_resource(experimental_allow_widgets=True)
+@st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
