@@ -1,12 +1,12 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import extra_streamlit_components as stx
+import datetime
 
 # ==========================================
-# 1. 포트폴리오 정의 (순서 고정)
+# 1. 포트폴리오 정의
 # ==========================================
-
-# (A) 현금성 자산 ETF (전체 자산 대비 비중, 합계 20%)
 fixed_portfolio = [
     {"name": "GLDM (금)",    "ticker": "GLDM", "ratio": 0.05, "country": "US"},
     {"name": "VTV (가치주)",  "ticker": "VTV",  "ratio": 0.05, "country": "US"},
@@ -15,7 +15,6 @@ fixed_portfolio = [
     {"name": "SCHD (배당주)", "ticker": "SCHD", "ratio": 0.05, "country": "US"},
 ]
 
-# (B) 투자 자산 (투자 예산(60%) 내에서의 비중, 합계 100%)
 invest_portfolio = [
     {"name": "TSM",        "ticker": "TSM",    "ratio": 0.22, "country": "US"},
     {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.08, "country": "US"},
@@ -34,27 +33,46 @@ all_stocks = fixed_portfolio + invest_portfolio
 all_names = [item['name'].split()[0] for item in all_stocks] 
 
 # ==========================================
-# 2. 앱 화면 구성
+# 2. 앱 화면 구성 & 자동 저장(쿠키) 설정
 # ==========================================
-st.set_page_config(page_title="스마트 리밸런싱", page_icon="🎯", layout="wide")
-st.title("🎯 스마트 리밸런싱")
+st.set_page_config(page_title="스마트 리밸런싱", page_icon="💾", layout="wide")
+st.title("💾 스마트 리밸런싱 (자동 저장판)")
 
-# 1) 현금 입력
+# 쿠키 매니저 불러오기
+@st.cache_resource(experimental_allow_widgets=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
+
+# 아이패드에 저장된 이전 기록 읽어오기
+saved_cash = cookie_manager.get("my_cash")
+saved_holdings = cookie_manager.get("my_holdings")
+
+# 저장된 값이 없으면 기본값 세팅
+try:
+    default_cash = int(saved_cash) if saved_cash is not None else 10000000
+except:
+    default_cash = 10000000
+
+default_holdings = str(saved_holdings) if saved_holdings is not None else ""
+
+# 화면 입력창 (이전에 저장된 값이 자동으로 들어가 있음)
 st.subheader("💵 보유 현금 입력")
 input_cash = st.number_input(
     "현재 계좌에 있는 현금(예수금) 총액 (원화)", 
-    min_value=0, value=10000000, step=100000, format="%d"
+    min_value=0, value=default_cash, step=100000, format="%d"
 )
 
 st.write("---")
 
-# 2) 보유 수량 입력
 st.subheader("🔢 보유 수량 입력")
 st.caption(f"**입력 순서:** {' → '.join(all_names)}")
 
 holdings_input = st.text_input(
     "종목별 수량 (띄어쓰기로 구분)", 
-    placeholder="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    value=default_holdings,
+    placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 15 200 50"
 )
 
 # 가격 조회 함수
@@ -72,7 +90,13 @@ def get_real_price(ticker, country):
     except:
         return 0
 
-if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
+# 버튼을 누르면 계산과 동시에 아이패드에 저장함
+if st.button("저장 및 분석 실행 🚀", type="primary"):
+    
+    # 🌟 핵심: 현재 입력된 값을 10년 만기로 쿠키(아이패드)에 저장
+    expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
+    cookie_manager.set("my_cash", str(input_cash), expires_at=expire_date)
+    cookie_manager.set("my_holdings", holdings_input, expires_at=expire_date)
     
     # 입력값 파싱
     try:
@@ -88,9 +112,8 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
 
-    with st.spinner('실시간 데이터 조회 중...'):
+    with st.spinner('실시간 데이터 조회 및 자산 계산 중...'):
         
-        # 환율 조회
         try:
             exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
         except:
@@ -133,42 +156,28 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
         rows = []
         total_buy_cost = 0 
 
-        # ★ 예산 섹터별 할당
-        budget_fixed = total_asset * 0.20   # 현금성 자산 (20%)
-        budget_invest = total_asset * 0.60  # 투자 자산 (60%)
-        # 나머지 20%는 순수 현금
+        budget_invest = total_asset * 0.60  # 투자 예산
 
         for i, p in enumerate(all_stocks):
-            
             cached = stock_data_cache[i]
             price_krw = cached['price_krw']
             price_usd = cached['price_usd']
             my_amt = cached['my_amt']
             my_qty = user_holdings[i]
 
-            # 구분 및 목표금액 계산 로직 수정
             if i < 5: 
                 category = "현금성ETF"
-                # 고정자산은 '전체 자산 대비 비율'이므로 바로 곱함 (0.05 * Total)
                 target_amt = total_asset * p['ratio']
-                
-                # 표에 보여줄 이론상 목표비중 (전체 대비)
                 display_target_ratio = p['ratio']
-                
             elif p['country'] == "KR": 
                 category = "국장(투자)"
-                # 투자자산은 '투자 예산(60%) 내에서의 비율'이므로 (0.22 * Budget_Invest)
                 target_amt = budget_invest * p['ratio']
-                
-                # 표에 보여줄 이론상 목표비중 (전체 대비로 환산: 0.6 * 0.22 = 0.132)
                 display_target_ratio = 0.60 * p['ratio']
-                
             else: 
                 category = "미장(투자)"
                 target_amt = budget_invest * p['ratio']
                 display_target_ratio = 0.60 * p['ratio']
 
-            # 목표 수량 (반올림)
             if price_krw > 0:
                 target_qty = round(target_amt / price_krw)
             else:
@@ -177,10 +186,8 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
             actual_target_cost = target_qty * price_krw
             total_buy_cost += actual_target_cost
 
-            # 실제 비중 (현재 내 자산 기준)
             current_ratio = my_amt / total_asset
 
-            # 실행 신호
             diff = target_qty - my_qty
             if diff > 0:
                 action = f"🔴 {int(diff)}주 매수"
@@ -210,9 +217,6 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
 
         # 잔여 현금 계산
         remaining_cash = total_asset - total_buy_cost
-        
-        # 현금 비중
-        cash_target_ratio = 0.20
         current_cash_ratio = input_cash / total_asset
 
         rows.append({
@@ -220,7 +224,7 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
             "종목": "예수금 (KRW)",
             "현재가($)": "-",
             "현재가(₩)": "1원",
-            "목표비중(전체)": cash_target_ratio,
+            "목표비중(전체)": 0.20,
             "실제비중": current_cash_ratio,
             "목표금액": remaining_cash,
             "목표금액(표시)": remaining_cash,
@@ -229,7 +233,6 @@ if st.button("자산 분석 및 리밸런싱 🚀", type="primary"):
             "실행": f"예상잔고: {remaining_cash:,.0f}원",
         })
 
-        # DataFrame
         df = pd.DataFrame(rows)
         df = df.sort_values(by='목표금액', ascending=False)
         
