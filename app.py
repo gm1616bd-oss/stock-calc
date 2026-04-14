@@ -11,9 +11,8 @@ SHEET_CSV_URL = "여기에_시트_CSV_링크를_넣어주세요"
 WEB_APP_URL = "여기에_웹앱_URL을_넣어주세요"
 
 # ==========================================
-# 1. 포트폴리오 정의 (팔란티어 삭제, 총 15종목)
+# 1. 포트폴리오 정의 (총 15종목)
 # ==========================================
-# (A) 현금성 자산 ETF (전체 자산의 16%)
 fixed_portfolio = [
     {"name": "GLDM (금)",    "ticker": "GLDM", "ratio": 0.04, "country": "US"},
     {"name": "VTV (가치주)",  "ticker": "VTV",  "ratio": 0.04, "country": "US"},
@@ -22,7 +21,6 @@ fixed_portfolio = [
     {"name": "SCHD (배당주)", "ticker": "SCHD", "ratio": 0.04, "country": "US"},
 ]
 
-# (B) 투자 자산 (전체 자산의 63%, 내부 합계 100%)
 invest_portfolio = [
     {"name": "TSM",        "ticker": "TSM",    "ratio": 0.25, "country": "US"},
     {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.08, "country": "US"},
@@ -67,7 +65,7 @@ except Exception as e:
 
 st.write("---")
 
-# --- 입력 영역 (URL 기억 기능 유지) ---
+# --- 입력 영역 ---
 params = st.query_params
 try: default_cash = int(params.get("cash", "10000000"))
 except: default_cash = 10000000
@@ -86,18 +84,43 @@ st.caption(f"**입력 순서 (총 15개):** {' → '.join(all_names)}")
 holdings_input = st.text_input(
     "종목별 수량 (띄어쓰기로 구분)", 
     value=default_holdings,
-    placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 200 50" # 팔란티어 자리 삭제됨
+    placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 200 50"
 )
 
-def get_real_price(ticker, country):
+# ★ 가격 및 전일비(등락률) 조회 함수 통합
+def get_real_price_and_change(ticker, country):
     try:
         stock = yf.Ticker(ticker)
-        if country == "KR": return stock.fast_info['last_price']
+        
+        # 이전 종가 안전하게 가져오기
+        try:
+            prev_close = stock.fast_info['previous_close']
+        except:
+            hist = stock.history(period="5d")
+            prev_close = hist['Close'].iloc[-2] if len(hist) >= 2 else 0
+
+        # 현재가 가져오기
+        if country == "KR":
+            try:
+                current_price = stock.fast_info['last_price']
+            except:
+                current_price = stock.history(period="1d")['Close'].iloc[-1]
         else:
             df = stock.history(period="1d", interval="1m", prepost=True)
-            if not df.empty: return df['Close'].iloc[-1]
-            else: return stock.fast_info['last_price']
-    except: return 0
+            if not df.empty:
+                current_price = df['Close'].iloc[-1]
+            else:
+                current_price = stock.fast_info.get('last_price', prev_close)
+
+        # 등락률 계산 (%)
+        if prev_close > 0 and current_price > 0:
+            change_pct = ((current_price - prev_close) / prev_close) * 100
+        else:
+            change_pct = 0.0
+
+        return current_price, change_pct
+    except:
+        return 0, 0.0
 
 # --- 실행 버튼 ---
 if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
@@ -113,7 +136,7 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
 
-    with st.spinner('실시간 데이터 분석 및 시트 기록 중...'):
+    with st.spinner('실시간 시세 및 등락률 분석 중...'):
         
         try: exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
         except: exchange_rate = 1400 
@@ -122,7 +145,8 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
         stock_data_cache = [] 
 
         for i, p in enumerate(all_stocks):
-            price = get_real_price(p['ticker'], p['country'])
+            # 가격과 등락률 둘 다 받아오기
+            price, change_pct = get_real_price_and_change(p['ticker'], p['country'])
             
             if p['country'] == "US":
                 price_krw = price * exchange_rate
@@ -134,7 +158,12 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             my_qty = user_holdings[i]
             my_amt = my_qty * price_krw
             current_stock_assets += my_amt
-            stock_data_cache.append({"price_krw": price_krw, "price_usd": price_usd, "my_amt": my_amt})
+            stock_data_cache.append({
+                "price_krw": price_krw, 
+                "price_usd": price_usd, 
+                "my_amt": my_amt,
+                "change_pct": change_pct # 등락률 저장
+            })
 
         total_asset = current_stock_assets + input_cash
 
@@ -142,7 +171,6 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             st.error("총 자산이 0원입니다.")
             st.stop()
 
-        # 구글 시트 전송
         if "script.google.com" in WEB_APP_URL:
             try:
                 kst = timezone(timedelta(hours=9))
@@ -157,8 +185,6 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
 
         rows = []
         total_buy_cost = 0 
-        
-        # ★ 예산 배분 업데이트 (투자 자산 63%)
         budget_invest = total_asset * 0.63  
 
         for i, p in enumerate(all_stocks):
@@ -166,6 +192,7 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             price_krw = cached['price_krw']
             price_usd = cached['price_usd']
             my_amt = cached['my_amt']
+            change_pct = cached['change_pct']
             my_qty = user_holdings[i]
 
             if i < 5: 
@@ -196,17 +223,25 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             if p['country'] == "US": price_display = f"${price_usd:,.2f}"
             else: price_display = "-"
 
+            # 등락률 텍스트 포맷팅
+            if change_pct > 0:
+                change_str = f"▲ {change_pct:.2f}%"
+            elif change_pct < 0:
+                change_str = f"▼ {abs(change_pct):.2f}%"
+            else:
+                change_str = "-"
+
             rows.append({
-                "구분": category, "종목": p['name'], "현재가($)": price_display, "현재가(₩)": f"{price_krw:,.0f}원",
+                "구분": category, "종목": p['name'], "현재가($)": price_display, "현재가(₩)": f"{price_krw:,.0f}원", 
+                "등락률": change_str, # 추가된 등락률 열
                 "목표비중(전체)": display_target_ratio, "실제비중": current_ratio,
                 "목표금액": actual_target_cost, "목표금액(표시)": actual_target_cost,
                 "목표수량": int(target_qty), "내보유": int(my_qty), "실행": action,
             })
 
-        # ★ 잔여 현금 계산 (자연스럽게 약 21% 남음)
         remaining_cash = total_asset - total_buy_cost
         rows.append({
-            "구분": "💵 잔여현금", "종목": "예수금 (KRW)", "현재가($)": "-", "현재가(₩)": "1원",
+            "구분": "💵 잔여현금", "종목": "예수금 (KRW)", "현재가($)": "-", "현재가(₩)": "-", "등락률": "-",
             "목표비중(전체)": 0.21, "실제비중": input_cash / total_asset,
             "목표금액": remaining_cash, "목표금액(표시)": remaining_cash,
             "목표수량": int(remaining_cash), "내보유": int(input_cash),
@@ -216,6 +251,7 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
         df = pd.DataFrame(rows)
         df = df.sort_values(by='목표금액', ascending=False)
         
+        # 전체 행 배경색 (카테고리별)
         def style_dataframe(row):
             bg_color = 'white'
             if row['구분'] == '💵 잔여현금': bg_color = '#FFECB3'
@@ -224,16 +260,27 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             elif row['구분'] == '미장(투자)': bg_color = '#FCE4EC'
             return [f'background-color: {bg_color}'] * len(row)
 
+        # 등락률 셀 전용 색상 (연두/핑크)
+        def style_change_color(val):
+            if '▲' in str(val):
+                return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;' # 쨍한 연두색 배경, 짙은 초록 글씨
+            elif '▼' in str(val):
+                return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;' # 화사한 핑크색 배경, 짙은 빨강 글씨
+            return ''
+
+        # 실행 열 텍스트 색상
         def style_text_color(val):
             color = 'black'
             if '매수' in str(val): color = '#D32F2F'
             elif '매도' in str(val): color = '#1976D2'
             return f'color: {color}; font-weight: bold;'
 
+        # 두 가지 열에 각각의 스타일 적용 (map 메서드 체인)
         st.dataframe(
             df.style.apply(style_dataframe, axis=1)
                     .map(style_text_color, subset=['실행'])
+                    .map(style_change_color, subset=['등락률']) # 등락률 컬러 맵핑
                     .format({"목표비중(전체)": "{:.1%}", "실제비중": "{:.1%}", "목표금액(표시)": "{:,.0f}원", "내보유": "{:,.0f}", "목표수량": "{:,.0f}"}),
-            column_order=["구분", "종목", "현재가($)", "현재가(₩)", "목표비중(전체)", "실제비중", "목표금액(표시)", "목표수량", "내보유", "실행"],
+            column_order=["구분", "종목", "현재가($)", "현재가(₩)", "등락률", "목표비중(전체)", "실제비중", "목표금액(표시)", "목표수량", "내보유", "실행"],
             hide_index=True, use_container_width=True, height=900
         )
