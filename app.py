@@ -69,7 +69,6 @@ except Exception as e:
 
 st.write("---")
 
-# --- 입력 영역 ---
 params = st.query_params
 try: default_cash = int(params.get("cash", "10000000"))
 except: default_cash = 10000000
@@ -186,17 +185,15 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
                 requests.post(WEB_APP_URL, data={"date": today_str, "asset": int(total_asset)})
             except: pass
 
-        st.success(f"**📊 현재 총 자산:** {total_asset:,.0f}원 (삼성전자 포함)")
-        st.write("---")
-
-        # ==========================================
-        # 테이블 데이터 생성
-        # ==========================================
-        stock_rows = []
-        total_buy_cost = 0 
-        
+        # ★ 예산 완벽 분리: 전체 자산 vs 리밸런싱 대상 자산
         rebalance_budget = total_asset - sam_amt
         budget_invest = rebalance_budget * 0.63  
+
+        st.success(f"**📊 현재 총 자산:** {total_asset:,.0f}원 (삼성전자 제외 리밸런싱 예산: {rebalance_budget:,.0f}원)")
+        st.write("---")
+
+        stock_rows = []
+        total_buy_cost = 0 
 
         # 삼성전자 행
         sam_change_str = f"▲ {sam_change:.2f}%" if sam_change > 0 else (f"▼ {abs(sam_change):.2f}%" if sam_change < 0 else "-")
@@ -205,12 +202,13 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
         stock_rows.append({
             "종목": "🔒삼성전자 (고정)", "현재가($)": "-", "현재가(₩)": f"{sam_price:,.0f}원", 
             "등락률": sam_change_str, "오늘수익": sam_profit_str,
-            "목표비중": "-", "실제비중": f"{(sam_amt/total_asset):.1%}",
+            "목표비중": "-", "실제비중": f"{(sam_amt/total_asset):.1%} (총자산)",
             "목표금액": "-", "실제금액": f"{sam_amt:,.0f}원",
             "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
-            "등락률숫자": sam_change # 정렬용 숨김 데이터
+            "등락률숫자": sam_change 
         })
 
+        # 15개 종목 행
         for i, p in enumerate(all_stocks):
             cached = stock_data_cache[i]
             price_krw = cached['price_krw']
@@ -223,9 +221,6 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             if i < 5: 
                 target_amt = rebalance_budget * p['ratio']
                 display_target_ratio = f"{p['ratio']:.1%}"
-            elif p['country'] == "KR": 
-                target_amt = budget_invest * p['ratio']
-                display_target_ratio = f"{(0.63 * p['ratio']):.1%}"
             else: 
                 target_amt = budget_invest * p['ratio']
                 display_target_ratio = f"{(0.63 * p['ratio']):.1%}"
@@ -235,7 +230,9 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
             
             actual_target_cost = target_qty * price_krw
             total_buy_cost += actual_target_cost
-            current_ratio = f"{(my_amt / total_asset):.1%}"
+            
+            # 실제비중 계산을 리밸런싱 예산 기준으로 통일!
+            current_ratio = f"{(my_amt / rebalance_budget):.1%}" if rebalance_budget > 0 else "0.0%"
 
             diff = target_qty - my_qty
             if diff > 0: action = f"🔴 {int(diff)}주 매수"
@@ -253,17 +250,17 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
                 "목표금액": f"{actual_target_cost:,.0f}원", 
                 "실제금액": f"{my_amt:,.0f}원",
                 "목표수량": str(int(target_qty)), "내보유": str(int(my_qty)), "실행": action,
-                "등락률숫자": change_pct # 정렬용 숨김 데이터
+                "등락률숫자": change_pct 
             })
 
-        # ★ 등락률(숫자) 기준으로 내림차순 정렬 후 숨김 데이터 삭제
+        # 등락률 내림차순 정렬 (오른 종목이 위로)
         df_stocks = pd.DataFrame(stock_rows).sort_values(by='등락률숫자', ascending=False).drop(columns=['등락률숫자'])
 
         # 잔여현금
         remaining_cash = rebalance_budget - total_buy_cost
         cash_row = pd.DataFrame([{
             "종목": "💵 예수금 (현금)", "현재가($)": "-", "현재가(₩)": "-", "등락률": "-", "오늘수익": "-",
-            "목표비중": "21.0%", "실제비중": f"{(input_cash / total_asset):.1%}",
+            "목표비중": "21.0%", "실제비중": f"{(input_cash / rebalance_budget):.1%}" if rebalance_budget > 0 else "0.0%",
             "목표금액": f"{remaining_cash:,.0f}원", "실제금액": f"{input_cash:,.0f}원",
             "목표수량": "-", "내보유": str(int(input_cash)), "실행": f"예상잔고: {remaining_cash:,.0f}원"
         }])
@@ -274,42 +271,39 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
         
         total_row = pd.DataFrame([{
             "종목": "📊 포트폴리오 총합", "현재가($)": "-", "현재가(₩)": "-", "등락률": tot_pct_str, "오늘수익": tot_profit_str,
-            "목표비중": "100%", "실제비중": "100%",
-            "목표금액": f"{total_asset:,.0f}원", "실제금액": f"{total_asset:,.0f}원",
+            "목표비중": "-", "실제비중": "-",
+            "목표금액": "-", "실제금액": f"{total_asset:,.0f}원",
             "목표수량": "-", "내보유": "-", "실행": "-"
         }])
 
         df_final = pd.concat([df_stocks, cash_row, total_row], ignore_index=True)
         
-        # 행 배경색 처리
         def style_dataframe(row):
             bg_color = 'white'
             if '포트폴리오 총합' in row['종목']: bg_color = '#E8EAF6' 
             return [f'background-color: {bg_color}'] * len(row)
 
-        # 등락률 색상 처리
         def style_change_color(val):
             val_str = str(val)
             if '▲' in val_str: return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;'
             elif '▼' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
             return ''
 
-        # 실행 버튼 텍스트 색상 처리
         def style_text_color(val):
             color = 'black'
             if '매수' in str(val): color = '#D32F2F'
             elif '매도' in str(val): color = '#1976D2'
             return f'color: {color}; font-weight: bold;'
 
-        # ★ 전체 셀 가운데 정렬 추가
+        # 가운데 정렬 및 핏 맞춤 (use_container_width=False)
         st.dataframe(
             df_final.style.apply(style_dataframe, axis=1)
                     .map(style_text_color, subset=['실행'])
                     .map(style_change_color, subset=['등락률', '오늘수익'])
-                    .set_properties(**{'text-align': 'center'}), # 모든 데이터 가운데 정렬
+                    .set_properties(**{'text-align': 'center'}),
             column_order=["종목", "현재가($)", "현재가(₩)", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
             hide_index=True, 
-            use_container_width=False, # 화면에 꽉 채우지 않고 내용 길이에 딱 맞게 밀착!
+            use_container_width=False, 
             height=900
         )
 
