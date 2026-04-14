@@ -107,7 +107,6 @@ def get_real_price_and_change(ticker, country):
         stock = yf.Ticker(ticker)
         hist = stock.history(period="7d")
         
-        # ★ D-1 (전 거래일) 및 D-2 (전전 거래일) 데이터 추출
         if len(hist) >= 3:
             d2_close = hist['Close'].iloc[-3]
             d1_close = hist['Close'].iloc[-2]
@@ -198,14 +197,13 @@ if execute_btn:
         current_stock_assets = 0
         total_today_profit = 0
         total_prev_asset = input_cash 
-        total_prev2_asset = input_cash # D-2 총자산
+        total_prev2_asset = input_cash 
         stock_data_cache = [] 
         
         cat_cur = {"US": 0, "KR": 0, "ETF": 0}
         cat_prev = {"US": 0, "KR": 0, "ETF": 0}
         cat_prev2 = {"US": 0, "KR": 0, "ETF": 0}
 
-        # 삼성전자 계산 (D-2 포함)
         sam_price, sam_change, sam_prev, sam_prev_change, sam_d2 = get_real_price_and_change(SAMSUNG_TICKER, "KR")
         sam_amt = sam_price * SAMSUNG_QTY
         sam_profit = sam_amt - (sam_prev * SAMSUNG_QTY)
@@ -295,13 +293,14 @@ if execute_btn:
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부 (표 분리, D-1 열 추가)
+# 5. 화면 출력부 (표 분리, D-1 열 추가, UI개선)
 # ==========================================
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
     st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
-    col_btn1, col_btn2, col_btn3, _ = st.columns([1.5, 1.5, 1.5, 5.5])
+    # ★ 버튼 열 너비를 충분히 확보하여 글자가 한 줄로 나오게 수정했습니다!
+    col_btn1, col_btn2, col_btn3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
     if col_btn1.button("💰 실제금액 내림차순", use_container_width=True): st.session_state.sort_by = "실제금액숫자"
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
     if col_btn3.button("💸 오늘수익 내림차순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
@@ -440,6 +439,7 @@ if st.session_state.analyzed:
         elif '포트폴리오 총합' in row['종목']: bg_color = '#EEEEEE'
         return [f'background-color: {bg_color}'] * len(row)
 
+    # ★ 종목 너비를 160으로 최적화하여 가로로 너무 뚱뚱해지지 않게 잡았습니다.
     st.subheader("📑 개별 종목 상세 현황")
     st.dataframe(
         df_stocks.style.map(style_text_color, subset=['실행'])
@@ -447,7 +447,7 @@ if st.session_state.analyzed:
                  .map(style_d1_color, subset=['D-1'])
                  .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        column_config={"종목": st.column_config.TextColumn("종목", width=250)},
+        column_config={"종목": st.column_config.TextColumn("종목", width=160)},
         hide_index=True, use_container_width=False, height=650 
     )
 
@@ -460,7 +460,7 @@ if st.session_state.analyzed:
                   .map(style_d1_color, subset=['D-1'])
                   .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        column_config={"종목": st.column_config.TextColumn("종목", width=250)},
+        column_config={"종목": st.column_config.TextColumn("종목", width=160)},
         hide_index=True, use_container_width=False, height=250 
     )
 
