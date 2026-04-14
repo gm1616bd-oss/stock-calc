@@ -232,7 +232,7 @@ if st.button("분석 실행 및 시트에 기록 🚀", type="primary"):
 
         st.dataframe(
             df.style.apply(style_dataframe, axis=1)
-                    .applymap(style_text_color, subset=['실행'])
+                    .map(style_text_color, subset=['실행'])
                     .format({"목표비중(전체)": "{:.1%}", "실제비중": "{:.1%}", "목표금액(표시)": "{:,.0f}원", "내보유": "{:,.0f}", "목표수량": "{:,.0f}"}),
             column_order=["구분", "종목", "현재가($)", "현재가(₩)", "목표비중(전체)", "실제비중", "목표금액(표시)", "목표수량", "내보유", "실행"],
             hide_index=True, use_container_width=True, height=900
