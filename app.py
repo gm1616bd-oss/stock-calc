@@ -23,11 +23,11 @@ SAMSUNG_TICKER = "005930.KS"
 SAMSUNG_QTY = 41
 
 fixed_portfolio = [
-    {"name": "GLDM (금)",    "ticker": "GLDM", "ratio": 0.04, "country": "US"},
-    {"name": "VTV (가치주)",  "ticker": "VTV",  "ratio": 0.04, "country": "US"},
-    {"name": "TLT (장기채)",  "ticker": "TLT",  "ratio": 0.025, "country": "US"},
-    {"name": "IEI (중기채)",  "ticker": "IEI",  "ratio": 0.015, "country": "US"},
-    {"name": "SCHD (배당주)", "ticker": "SCHD", "ratio": 0.04, "country": "US"},
+    {"name": "GLDM",    "ticker": "GLDM", "ratio": 0.04, "country": "US"},
+    {"name": "VTV",  "ticker": "VTV",  "ratio": 0.04, "country": "US"},
+    {"name": "TLT",  "ticker": "TLT",  "ratio": 0.025, "country": "US"},
+    {"name": "IEI",  "ticker": "IEI",  "ratio": 0.015, "country": "US"},
+    {"name": "SCHD", "ticker": "SCHD", "ratio": 0.04, "country": "US"},
 ]
 
 invest_portfolio = [
@@ -44,11 +44,11 @@ invest_portfolio = [
 ]
 
 all_stocks = fixed_portfolio + invest_portfolio
-all_names = [item['name'].split()[0] for item in all_stocks] 
+all_names = [item['name'] for item in all_stocks] 
 
 # 브랜드 로고 및 상징 컬러 매핑
 brand_meta = {
-    "TSM": {"name": "📱 TSM", "color": "#1A4B9B"},
+    "TSM": {"name": "📱 TSM", "color": "#8A5A5A"}, # 적회색으로 변경
     "NVDA": {"name": "🤖 NVDA", "color": "#76B900"},
     "TSLA": {"name": "🚗 TSLA", "color": "#E31937"},
     "MSFT": {"name": "🪟 MSFT", "color": "#F34F1C"},
@@ -264,7 +264,7 @@ if st.session_state.analyzed:
     sam_profit_str = f"▲ {st.session_state.sam_profit:,.0f}원" if st.session_state.sam_profit > 0 else (f"▼ {abs(st.session_state.sam_profit):,.0f}원" if st.session_state.sam_profit < 0 else "-")
     
     stock_rows.append({
-        "종목": "🔒삼성전자", "현재가($)": "-", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", 
+        "종목": get_brand("삼성전자")["name"], "현재가($)": "-", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", 
         "등락률": sam_change_str, "오늘수익": sam_profit_str,
         "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
@@ -306,11 +306,10 @@ if st.session_state.analyzed:
         change_str = f"▲ {change_pct:.2f}%" if change_pct > 0 else (f"▼ {abs(change_pct):.2f}%" if change_pct < 0 else "-")
         profit_str = f"▲ {today_profit:,.0f}원" if today_profit > 0 else (f"▼ {abs(today_profit):,.0f}원" if today_profit < 0 else "-")
 
-        # 괄호 제거 로직 추가
-        clean_name = p['name'].split('(')[0].strip()
+        brand_name = get_brand(p['name'])["name"]
 
         stock_rows.append({
-            "종목": clean_name, "현재가($)": price_display, "현재가(₩)": f"{price_krw:,.0f}원", 
+            "종목": brand_name, "현재가($)": price_display, "현재가(₩)": f"{price_krw:,.0f}원", 
             "등락률": change_str, "오늘수익": profit_str,
             "목표비중": display_target_ratio, "실제비중": current_ratio,
             "목표금액": f"{actual_target_cost:,.0f}원", 
@@ -322,25 +321,7 @@ if st.session_state.analyzed:
     df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False)
     df_stocks = df_stocks.drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자'])
 
-    remaining_cash = st.session_state.rebalance_budget - total_buy_cost
-    cash_row = pd.DataFrame([{
-        "종목": "💵 예수금", "현재가($)": "-", "현재가(₩)": "-", "등락률": "-", "오늘수익": "-",
-        "목표비중": "21.0%", "실제비중": f"{(st.session_state.input_cash / st.session_state.rebalance_budget):.1%}" if st.session_state.rebalance_budget > 0 else "0.0%",
-        "목표금액": f"{remaining_cash:,.0f}원", "실제금액": f"{st.session_state.input_cash:,.0f}원",
-        "목표수량": "-", "내보유": "-", "실행": "-"
-    }])
-
-    tot_pct = st.session_state.total_daily_return_pct
-    tot_prof = st.session_state.total_today_profit
-    tot_pct_str = f"▲ {tot_pct:.2f}%" if tot_pct > 0 else (f"▼ {abs(tot_pct):.2f}%" if tot_pct < 0 else "-")
-    tot_profit_str = f"▲ {tot_prof:,.0f}원" if tot_prof > 0 else (f"▼ {abs(tot_prof):,.0f}원" if tot_prof < 0 else "-")
-    
-    total_row = pd.DataFrame([{
-        "종목": "📊 포트폴리오 총합", "현재가($)": "-", "현재가(₩)": "-", "등락률": tot_pct_str, "오늘수익": tot_profit_str,
-        "목표비중": "-", "실제비중": "-", "목표금액": "-", "실제금액": f"{st.session_state.total_asset:,.0f}원",
-        "목표수량": "-", "내보유": "-", "실행": "-"
-    }])
-
+    # 카테고리별 요약 행
     sum_rows = []
     for code, label in [("US", "🌎 해외주식 총합"), ("KR", "🇰🇷 국내주식 총합"), ("ETF", "🛡️ 현금성ETF 총합")]:
         c_cur = st.session_state.cat_stats[code]
@@ -357,7 +338,28 @@ if st.session_state.analyzed:
         })
     df_sums = pd.DataFrame(sum_rows)
 
-    df_final = pd.concat([df_stocks, cash_row, total_row, df_sums], ignore_index=True)
+    # 총합계 
+    tot_pct = st.session_state.total_daily_return_pct
+    tot_prof = st.session_state.total_today_profit
+    tot_pct_str = f"▲ {tot_pct:.2f}%" if tot_pct > 0 else (f"▼ {abs(tot_pct):.2f}%" if tot_pct < 0 else "-")
+    tot_profit_str = f"▲ {tot_prof:,.0f}원" if tot_prof > 0 else (f"▼ {abs(tot_prof):,.0f}원" if tot_prof < 0 else "-")
+    
+    total_row = pd.DataFrame([{
+        "종목": "📊 포트폴리오 총합", "현재가($)": "-", "현재가(₩)": "-", "등락률": tot_pct_str, "오늘수익": tot_profit_str,
+        "목표비중": "-", "실제비중": "100.0%", "목표금액": "-", "실제금액": f"{st.session_state.total_asset:,.0f}원",
+        "목표수량": "-", "내보유": "-", "실행": "-"
+    }])
+
+    # 잔여현금
+    remaining_cash = st.session_state.rebalance_budget - total_buy_cost
+    cash_row = pd.DataFrame([{
+        "종목": get_brand("예수금")["name"], "현재가($)": "-", "현재가(₩)": "-", "등락률": "-", "오늘수익": "-",
+        "목표비중": "21.0%", "실제비중": f"{(st.session_state.input_cash / st.session_state.total_asset):.1%}",
+        "목표금액": f"{remaining_cash:,.0f}원", "실제금액": f"{st.session_state.input_cash:,.0f}원",
+        "목표수량": "-", "내보유": "-", "실행": "-"
+    }])
+
+    df_final = pd.concat([df_stocks, df_sums, total_row, cash_row], ignore_index=True)
     
     def style_dataframe(row):
         bg_color = 'white'
@@ -365,6 +367,7 @@ if st.session_state.analyzed:
         elif '해외주식' in row['종목']: bg_color = '#FCE4EC'
         elif '국내주식' in row['종목']: bg_color = '#E3F2FD'
         elif '현금성ETF' in row['종목']: bg_color = '#FFF9C4'
+        elif '예수금' in row['종목']: bg_color = '#F1F8E9' 
         return [f'background-color: {bg_color}'] * len(row)
 
     def style_change_color(val):
@@ -385,66 +388,107 @@ if st.session_state.analyzed:
                 .map(style_change_color, subset=['등락률', '오늘수익'])
                 .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
+        column_config={"종목": st.column_config.TextColumn("종목", width=250)},
         hide_index=True, use_container_width=False, height=900
     )
 
     # ==========================================
-    # 5. 차트 출력 구역 (3년 누적 / 파이차트)
+    # 5. 차트 출력 구역 (3년 누적 / 파이차트 / 캔들)
     # ==========================================
     with st.spinner("3년치 시뮬레이션 및 차트 렌더링 중..."):
         try:
             df_hist = st.session_state.df_hist
             
+            # OHLC 진짜 계산으로 캔들 꼬리 부활!
+            def get_series(col):
+                s = pd.Series(st.session_state.input_cash, index=df_hist.index) 
+                s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+                for i, p in enumerate(all_stocks):
+                    qty = st.session_state.user_holdings[i]
+                    if qty > 0:
+                        tkr = p['ticker']
+                        if p['country'] == 'US': s += df_hist[col][tkr].ffill().bfill() * df_hist[col]['KRW=X'].ffill().bfill() * qty
+                        else: s += df_hist[col][tkr].ffill().bfill() * qty
+                return s
+
+            hist_O = get_series('Open')
+            hist_H = get_series('High')
+            hist_L = get_series('Low')
+            hist_C = get_series('Close')
+
+            # 누적 차트용 데이터 (종가 기준)
             s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
             s_etf = pd.Series(0, index=df_hist.index)
             s_us = pd.Series(0, index=df_hist.index)
             s_kr = pd.Series(0, index=df_hist.index)
-
             s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
             
             for i, p in enumerate(all_stocks):
                 qty = st.session_state.user_holdings[i]
                 if qty > 0:
                     tkr = p['ticker']
-                    if p['country'] == 'US': 
-                        val = df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
-                    else: 
-                        val = df_hist['Close'][tkr].ffill().bfill() * qty
+                    if p['country'] == 'US': val = df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
+                    else: val = df_hist['Close'][tkr].ffill().bfill() * qty
                     
                     if i < 5: s_etf += val
                     elif p['country'] == 'US': s_us += val
                     else: s_kr += val
 
-            s_tot_C = s_cash + s_etf + s_us + s_kr
-            max_val = s_tot_C.max() * 1.05
-            y_max = max(max_val, 52000000)
+            # 전고점(ATH) 찾기
+            ath_val = hist_H.max()
+            ath_date = hist_H.idxmax()
+
+            # 초기 3개월 줌 아웃 세팅
+            last_date = df_hist.index[-1]
+            zoom_start = last_date - pd.Timedelta(days=90)
+            
+            # 3개월 기준 최저점 찾아서 Y축 바닥 설정
+            mask = (df_hist.index >= zoom_start)
+            if mask.any():
+                min_y = hist_L[mask].min() * 0.95
+                max_y = hist_H[mask].max() * 1.05
+            else:
+                min_y = hist_L.min() * 0.95
+                max_y = hist_H.max() * 1.05
 
             first_days = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
 
             st.write("---")
             st.subheader("📉 내 포트폴리오 3년 과거 시뮬레이션 (누적 영역형)")
-            st.caption("※ 주말/휴일은 제외되었으며, 매월 1일(첫 거래일)마다 점선 보조선이 표시됩니다.")
+            st.caption("※ 초기 화면은 최근 3개월로 확대되어 있으며, 더블 클릭 시 3년 전체를 볼 수 있습니다.")
 
+            # 1. 누적 영역 차트 + 총자산 라인 덧그리기
             fig_area = go.Figure()
             fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
             fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_etf, mode='none', fill='tonexty', name='🛡️ 현금성ETF', stackgroup='one', fillcolor='#FFD54F'))
             fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_us, mode='none', fill='tonexty', name='🌎 해외주식', stackgroup='one', fillcolor='#F06292'))
             fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_kr, mode='none', fill='tonexty', name='🇰🇷 국내주식', stackgroup='one', fillcolor='#64B5F6'))
             
-            fig_area.update_layout(yaxis_range=[50000000, y_max], margin=dict(l=0, r=0, t=30, b=0), height=500)
+            # 총자산 라인 진하게 추가
+            fig_area.add_trace(go.Scatter(x=df_hist.index, y=hist_C, mode='lines', name='📈 총자산 흐름', line=dict(color='#222222', width=2)))
+
+            # 전고점 깃발
+            fig_area.add_annotation(x=ath_date, y=ath_val, text=f"🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-40, bgcolor="white", bordercolor="red")
+
+            fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
             fig_area.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])]) 
             for d in first_days: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
             st.plotly_chart(fig_area, use_container_width=True)
 
-            st.subheader("🕯️ 총 자산 캔들 차트 (3년)")
-            fig_candle = go.Figure(data=[go.Candlestick(x=s_tot_C.index,
-                            open=s_tot_C.shift(1).bfill().values, high=s_tot_C.values*1.001,
-                            low=s_tot_C.shift(1).bfill().values*0.999, close=s_tot_C.values)])
-            fig_candle.update_layout(yaxis_range=[50000000, y_max], margin=dict(l=0, r=0, t=30, b=0), height=400)
+            # 2. 캔들 차트 (진짜 꼬리 부활)
+            st.subheader("🕯️ 총 자산 캔들 차트")
+            fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index,
+                            open=hist_O.values, high=hist_H.values,
+                            low=hist_L.values, close=hist_C.values, name='총자산 캔들')])
+            
+            fig_candle.add_annotation(x=ath_date, y=ath_val, text=f"🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-40, bgcolor="white", bordercolor="red")
+
+            fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=400)
             fig_candle.update_xaxes(rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
             for d in first_days: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
             st.plotly_chart(fig_candle, use_container_width=True)
 
+            # 3. 파이 차트
             st.subheader("🍕 현재 자산 구성 비율")
             pie_data = []
             if st.session_state.sam_amt > 0: 
@@ -456,7 +500,6 @@ if st.session_state.analyzed:
                 pie_data.append({"종목": get_brand("예수금")["name"], "금액": st.session_state.input_cash})
 
             df_pie = pd.DataFrame(pie_data)
-            
             custom_colors = {v["name"]: v["color"] for v in brand_meta.values()}
 
             fig_pie = px.pie(df_pie, values='금액', names='종목', color='종목', color_discrete_map=custom_colors, hole=0.3)
