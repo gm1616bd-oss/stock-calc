@@ -299,7 +299,6 @@ if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
     st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
-    # ★ 버튼 열 너비를 충분히 확보하여 글자가 한 줄로 나오게 수정했습니다!
     col_btn1, col_btn2, col_btn3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
     if col_btn1.button("💰 실제금액 내림차순", use_container_width=True): st.session_state.sort_by = "실제금액숫자"
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
@@ -439,7 +438,6 @@ if st.session_state.analyzed:
         elif '포트폴리오 총합' in row['종목']: bg_color = '#EEEEEE'
         return [f'background-color: {bg_color}'] * len(row)
 
-    # ★ 종목 너비를 160으로 최적화하여 가로로 너무 뚱뚱해지지 않게 잡았습니다.
     st.subheader("📑 개별 종목 상세 현황")
     st.dataframe(
         df_stocks.style.map(style_text_color, subset=['실행'])
@@ -534,7 +532,9 @@ if st.session_state.analyzed:
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
-            first_days = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
+            # ★ 월 구분선과 연 구분선 분리!
+            first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
+            first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
             with tab1:
                 fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index,
@@ -552,7 +552,13 @@ if st.session_state.analyzed:
                 fig_candle.update_yaxes(tickformat=",.0f")
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
-                for d in first_days: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                
+                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
+                for d in first_days_month: 
+                    if d in first_days_year:
+                        fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else:
+                        fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_candle, use_container_width=True)
 
             with tab2:
@@ -574,7 +580,13 @@ if st.session_state.analyzed:
                 fig_area.update_yaxes(tickformat=",.0f")
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                for d in first_days: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                
+                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
+                for d in first_days_month: 
+                    if d in first_days_year:
+                        fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else:
+                        fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
 
         except Exception as e:
