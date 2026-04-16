@@ -176,7 +176,7 @@ if execute_btn:
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
 
-    with st.spinner('실시간 시세 및 차트 로딩 중... (약 15~20초 소요)'):
+    with st.spinner('실시간 시세 및 차트 로딩 중... (약 15초 소요)'):
         try: exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
         except: exchange_rate = 1400 
         
@@ -253,16 +253,9 @@ if execute_btn:
             try: requests.post(WEB_APP_URL, data={"date": now.strftime("%Y-%m-%d"), "asset": int(total_asset)})
             except: pass
 
-        # 3년치 글로벌 차트 다운로드
+        # 3년치 글로벌 차트 다운로드 (5분봉은 제거됨)
         tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER]
         df_hist = yf.download(tickers, period="3y", progress=False)
-
-        # 5분봉 데이터 다운로드 (최근 2일)
-        kr_tickers = [SAMSUNG_TICKER] + [p['ticker'] for p in all_stocks if p['country'] == 'KR']
-        us_tickers = [p['ticker'] for p in all_stocks if p['country'] == 'US']
-        
-        df_5m_kr = yf.download(kr_tickers, period="2d", interval="5m", progress=False)
-        df_5m_us = yf.download(us_tickers + ["KRW=X"], period="2d", interval="5m", progress=False)
 
         st.session_state.total_asset = total_asset
         st.session_state.rebalance_budget = total_asset - sam_amt
@@ -283,8 +276,6 @@ if execute_btn:
             "ETF": cat_cur["ETF"], "ETF_P": cat_prev["ETF"], "ETF_P2": cat_prev2["ETF"]
         }
         st.session_state.df_hist = df_hist
-        st.session_state.df_5m_kr = df_5m_kr
-        st.session_state.df_5m_us = df_5m_us
         st.session_state.analyzed = True
         st.rerun()
 
@@ -525,11 +516,66 @@ if st.session_state.analyzed:
     
     with col_chart:
         st.subheader("📉 자산 성장 시뮬레이션 (3년)")
-        tab1, tab2 = st.tabs(["🕯️ 총자산 캔들형", "📊 층별 누적 영역형"])
+        # 탭을 4개로 분리 (국장, 미장 추가)
+        tab1, tab2, tab3, tab4 = st.tabs(["🕯️ 총자산 캔들형", "📊 층별 누적 영역형", "🇰🇷 국장 캔들형", "🌎 미장 캔들형"])
         
         try:
             df_hist = st.session_state.df_hist
-            
+            first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
+            first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
+
+            # 차트를 그리는 공통 헬퍼 함수
+            def create_candle_fig(O_series, H_series, L_series, C_series, name, real_time_val):
+                if len(C_series) > 0:
+                    C_series.iloc[-1] = real_time_val
+                    if H_series.iloc[-1] < real_time_val: H_series.iloc[-1] = real_time_val
+                    if L_series.iloc[-1] > real_time_val: L_series.iloc[-1] = real_time_val
+
+                ath_val = H_series.max()
+                ath_date = H_series.idxmax()
+                last_date = C_series.index[-1]
+                zoom_start = last_date - pd.Timedelta(days=90)
+                
+                mask = (C_series.index >= zoom_start)
+                if mask.any():
+                    low_3m_val = L_series[mask].min()
+                    low_3m_date = L_series[mask].idxmin()
+                else:
+                    low_3m_val = L_series.min()
+                    low_3m_date = L_series.idxmin()
+
+                curr_val = C_series.iloc[-1]
+                curr_date = C_series.index[-1]
+
+                fig = go.Figure(data=[go.Candlestick(x=C_series.index,
+                                open=O_series.values, high=H_series.values,
+                                low=L_series.values, close=C_series.values, name=name)])
+                
+                fig.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
+                fig.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
+                fig.add_hline(y=curr_val, line_dash="dash", line_color="red", opacity=0.7)
+
+                fig.add_annotation(x=ath_date, y=ath_val, text=f"📅 {ath_date.strftime('%y년 %m월 %d일')}<br>🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
+                fig.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
+                
+                # 깃발 우측 배치 (ax=70, xanchor="left")
+                fig.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=70, ay=0, bgcolor="white", bordercolor="red", xanchor="left")
+
+                fig.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) 
+                fig.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])]) 
+                
+                # 우측 여백 15일 추가하여 깃발 글씨가 잘리지 않도록 보호
+                fig.update_layout(xaxis_range=[zoom_start, last_date + pd.Timedelta(days=15)], margin=dict(l=0, r=0, t=30, b=0), height=500)
+                
+                for d in first_days_month: 
+                    if d in first_days_year:
+                        fig.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else:
+                        fig.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                
+                return fig
+
+            # 1) 전체 자산 계산
             def get_series(col):
                 s = pd.Series(st.session_state.input_cash, index=df_hist.index) 
                 s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
@@ -546,72 +592,73 @@ if st.session_state.analyzed:
             hist_L = get_series('Low')
             hist_C = get_series('Close')
 
-            real_time_total = st.session_state.total_asset
-            if len(hist_C) > 0:
-                hist_C.iloc[-1] = real_time_total
-                if hist_H.iloc[-1] < real_time_total: hist_H.iloc[-1] = real_time_total
-                if hist_L.iloc[-1] > real_time_total: hist_L.iloc[-1] = real_time_total
+            # 2) 국가별 자산 (국장/미장) 계산 함수 (예수금 제외, 순수 주식만 합산)
+            def get_market_series(col, market):
+                s = pd.Series(0, index=df_hist.index)
+                if market == 'KR':
+                    s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+                for i, p in enumerate(all_stocks):
+                    qty = st.session_state.user_holdings[i]
+                    if qty > 0 and p['country'] == market:
+                        tkr = p['ticker']
+                        if market == 'US':
+                            s += df_hist[col][tkr].ffill().bfill() * df_hist[col]['KRW=X'].ffill().bfill() * qty
+                        else:
+                            s += df_hist[col][tkr].ffill().bfill() * qty
+                return s
 
-            s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
-            s_etf = pd.Series(0, index=df_hist.index)
-            s_us = pd.Series(0, index=df_hist.index)
-            s_kr = pd.Series(0, index=df_hist.index)
-            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            
-            for i, p in enumerate(all_stocks):
-                qty = st.session_state.user_holdings[i]
-                if qty > 0:
-                    tkr = p['ticker']
-                    if p['country'] == 'US': val = df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
-                    else: val = df_hist['Close'][tkr].ffill().bfill() * qty
-                    if i < 5: s_etf += val
-                    elif p['country'] == 'US': s_us += val
-                    else: s_kr += val
+            kr_O = get_market_series('Open', 'KR')
+            kr_H = get_market_series('High', 'KR')
+            kr_L = get_market_series('Low', 'KR')
+            kr_C = get_market_series('Close', 'KR')
 
-            ath_val = hist_H.max()
-            ath_date = hist_H.idxmax()
-            last_date = df_hist.index[-1]
-            zoom_start = last_date - pd.Timedelta(days=90)
-            
-            mask = (df_hist.index >= zoom_start)
-            if mask.any():
-                low_3m_val = hist_L[mask].min()
-                low_3m_date = hist_L[mask].idxmin()
-            else:
-                low_3m_val = hist_L.min()
-                low_3m_date = hist_L.idxmin()
-
-            curr_val = hist_C.iloc[-1]
-            curr_date = hist_C.index[-1]
-
-            first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
-            first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
+            us_O = get_market_series('Open', 'US')
+            us_H = get_market_series('High', 'US')
+            us_L = get_market_series('Low', 'US')
+            us_C = get_market_series('Close', 'US')
 
             with tab1:
-                fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index,
-                                open=hist_O.values, high=hist_H.values,
-                                low=hist_L.values, close=hist_C.values, name='총자산 캔들')])
-                
-                fig_candle.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
-                fig_candle.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
-                fig_candle.add_hline(y=curr_val, line_dash="dash", line_color="red", opacity=0.7)
-
-                fig_candle.add_annotation(x=ath_date, y=ath_val, text=f"📅 {ath_date.strftime('%y년 %m월 %d일')}<br>🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
-                fig_candle.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
-                fig_candle.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
-
-                fig_candle.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) 
-                fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])]) 
-                fig_candle.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500)
-                
-                for d in first_days_month: 
-                    if d in first_days_year:
-                        fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else:
-                        fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
-                st.plotly_chart(fig_candle, use_container_width=True)
+                fig_total = create_candle_fig(hist_O, hist_H, hist_L, hist_C, '총자산 캔들', st.session_state.total_asset)
+                st.plotly_chart(fig_total, use_container_width=True)
 
             with tab2:
+                s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
+                s_etf = pd.Series(0, index=df_hist.index)
+                s_us = pd.Series(0, index=df_hist.index)
+                s_kr = pd.Series(0, index=df_hist.index)
+                s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+                
+                for i, p in enumerate(all_stocks):
+                    qty = st.session_state.user_holdings[i]
+                    if qty > 0:
+                        tkr = p['ticker']
+                        if p['country'] == 'US': val = df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
+                        else: val = df_hist['Close'][tkr].ffill().bfill() * qty
+                        if i < 5: s_etf += val
+                        elif p['country'] == 'US': s_us += val
+                        else: s_kr += val
+
+                # 영역 차트의 현재가 실시간 반영
+                real_time_total = st.session_state.total_asset
+                if len(hist_C) > 0:
+                    hist_C.iloc[-1] = real_time_total
+
+                ath_val = hist_H.max()
+                ath_date = hist_H.idxmax()
+                last_date = df_hist.index[-1]
+                zoom_start = last_date - pd.Timedelta(days=90)
+                
+                mask = (df_hist.index >= zoom_start)
+                if mask.any():
+                    low_3m_val = hist_L[mask].min()
+                    low_3m_date = hist_L[mask].idxmin()
+                else:
+                    low_3m_val = hist_L.min()
+                    low_3m_date = hist_L.idxmin()
+
+                curr_val = hist_C.iloc[-1]
+                curr_date = hist_C.index[-1]
+
                 fig_area = go.Figure()
                 fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
                 fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_etf, mode='none', fill='tonexty', name='🛡️ 현금성ETF', stackgroup='one', fillcolor='#FFD54F'))
@@ -625,11 +672,11 @@ if st.session_state.analyzed:
 
                 fig_area.add_annotation(x=ath_date, y=ath_val, text=f"📅 {ath_date.strftime('%y년 %m월 %d일')}<br>🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
                 fig_area.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
-                fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
+                fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=70, ay=0, bgcolor="white", bordercolor="red", xanchor="left")
 
                 fig_area.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])])
-                fig_area.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig_area.update_layout(xaxis_range=[zoom_start, last_date + pd.Timedelta(days=15)], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
                 for d in first_days_month: 
                     if d in first_days_year:
@@ -637,6 +684,16 @@ if st.session_state.analyzed:
                     else:
                         fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
+
+            with tab3:
+                kr_real_time_val = st.session_state.cat_stats["KR"]
+                fig_kr = create_candle_fig(kr_O, kr_H, kr_L, kr_C, '국장 캔들', kr_real_time_val)
+                st.plotly_chart(fig_kr, use_container_width=True)
+
+            with tab4:
+                us_real_time_val = st.session_state.cat_stats["US"] + st.session_state.cat_stats["ETF"]
+                fig_us = create_candle_fig(us_O, us_H, us_L, us_C, '미장 캔들', us_real_time_val)
+                st.plotly_chart(fig_us, use_container_width=True)
 
         except Exception as e:
             st.warning("차트 데이터를 불러오는 데 일시적인 문제가 발생했습니다.")
@@ -662,80 +719,3 @@ if st.session_state.analyzed:
             st.plotly_chart(fig_pie, use_container_width=True)
         except Exception as e:
             st.warning("비율 데이터를 표시할 수 없습니다.")
-
-    # ==========================================
-    # 7. 국장 / 미장 실시간 5분봉 분리 차트 (최근 2일)
-    # ==========================================
-    st.write("---")
-    st.subheader("⏱️ 국장 / 미장 실시간 5분봉 시뮬레이션 (최근 2일)")
-    st.caption("※ 장이 닫힌 시간대에는 이전 종가가 계속 유지(보합)되어 계산됩니다. 각 종목의 실제 비중이 차트에 그대로 녹아있습니다.")
-    
-    col_kr_5m, col_us_5m = st.columns(2)
-
-    try:
-        df_5m_kr = st.session_state.df_5m_kr
-        df_5m_us = st.session_state.df_5m_us
-
-        # --- 7-1. 국장 5분봉 계산 ---
-        kr_O = pd.Series(0, index=df_5m_kr.index)
-        kr_H = pd.Series(0, index=df_5m_kr.index)
-        kr_L = pd.Series(0, index=df_5m_kr.index)
-        kr_C = pd.Series(0, index=df_5m_kr.index)
-
-        if SAMSUNG_QTY > 0:
-            kr_O += df_5m_kr['Open'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            kr_H += df_5m_kr['High'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            kr_L += df_5m_kr['Low'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            kr_C += df_5m_kr['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-
-        for i, p in enumerate(all_stocks):
-            if p['country'] == 'KR':
-                qty = st.session_state.user_holdings[i]
-                if qty > 0:
-                    kr_O += df_5m_kr['Open'][p['ticker']].ffill().bfill() * qty
-                    kr_H += df_5m_kr['High'][p['ticker']].ffill().bfill() * qty
-                    kr_L += df_5m_kr['Low'][p['ticker']].ffill().bfill() * qty
-                    kr_C += df_5m_kr['Close'][p['ticker']].ffill().bfill() * qty
-
-        with col_kr_5m:
-            st.markdown("##### 🇰🇷 한국 시장 (원화 자산)")
-            if kr_C.sum() > 0:
-                fig_kr_5m = go.Figure(data=[go.Candlestick(x=kr_C.index, open=kr_O, high=kr_H, low=kr_L, close=kr_C, name='국장 5분봉')])
-                fig_kr_5m.update_layout(xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), height=350)
-                fig_kr_5m.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
-                fig_kr_5m.update_xaxes(tickformat="%m/%d %H:%M")
-                st.plotly_chart(fig_kr_5m, use_container_width=True)
-            else:
-                st.info("한국 시장 보유 자산이 없습니다.")
-
-        # --- 7-2. 미장 5분봉 계산 (환율 적용) ---
-        us_O = pd.Series(0, index=df_5m_us.index)
-        us_H = pd.Series(0, index=df_5m_us.index)
-        us_L = pd.Series(0, index=df_5m_us.index)
-        us_C = pd.Series(0, index=df_5m_us.index)
-
-        # 5분봉 환율을 기반으로 곱하기 (오류 방지를 위해 Close 가격만 차용하여 동일 적용)
-        krw_x = df_5m_us['Close']['KRW=X'].ffill().bfill()
-
-        for i, p in enumerate(all_stocks):
-            if p['country'] == 'US':
-                qty = st.session_state.user_holdings[i]
-                if qty > 0:
-                    us_O += df_5m_us['Open'][p['ticker']].ffill().bfill() * krw_x * qty
-                    us_H += df_5m_us['High'][p['ticker']].ffill().bfill() * krw_x * qty
-                    us_L += df_5m_us['Low'][p['ticker']].ffill().bfill() * krw_x * qty
-                    us_C += df_5m_us['Close'][p['ticker']].ffill().bfill() * krw_x * qty
-
-        with col_us_5m:
-            st.markdown("##### 🌎 미국 시장 (원화 환산 자산)")
-            if us_C.sum() > 0:
-                fig_us_5m = go.Figure(data=[go.Candlestick(x=us_C.index, open=us_O, high=us_H, low=us_L, close=us_C, name='미장 5분봉')])
-                fig_us_5m.update_layout(xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), height=350)
-                fig_us_5m.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
-                fig_us_5m.update_xaxes(tickformat="%m/%d %H:%M")
-                st.plotly_chart(fig_us_5m, use_container_width=True)
-            else:
-                st.info("미국 시장 보유 자산이 없습니다.")
-
-    except Exception as e:
-        st.warning("5분봉 데이터를 불러오는 중 일시적인 오류가 발생했습니다. (장 종료 직후나 네트워크 문제일 수 있습니다.)")
