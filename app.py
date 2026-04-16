@@ -8,55 +8,55 @@ from datetime import datetime, timedelta, timezone
 
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
-if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자"
+if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
+if "view_filter" not in st.session_state: st.session_state.view_filter = "전체"
+if "total_asset" not in st.session_state: st.session_state.total_asset = 0
 
 # ==========================================
-# 🔑 설정 및 포트폴리오 정의
+# 🔑 구글 시트 연결 설정 (사용자님 링크로 변경하세요!)
 # ==========================================
-# (기존 WEB_APP_URL 등은 그대로 유지하세요)
+SHEET_CSV_URL = "여기에_시트_CSV_링크를_넣어주세요"
 WEB_APP_URL = "여기에_웹앱_URL을_넣어주세요"
 
+# ==========================================
+# 1. 포트폴리오 정의 & 브랜드 메타데이터
+# ==========================================
 SAMSUNG_TICKER = "005930.KS"
+SAMSUNG_QTY = 41
 
 fixed_portfolio = [
-    {"name": "GLDM", "ticker": "GLDM", "ratio": 0.04, "country": "US"},
-    {"name": "VTV",  "ticker": "VTV",  "ratio": 0.04, "country": "US"},
-    {"name": "TLT",  "ticker": "TLT",  "ratio": 0.025, "country": "US"},
-    {"name": "IEI",  "ticker": "IEI",  "ratio": 0.015, "country": "US"},
-    {"name": "SCHD", "ticker": "SCHD", "ratio": 0.04, "country": "US"},
+    {"name": "GLDM", "ticker": "GLDM", "ratio": 0.04, "country": "US", "type": "ETF"},
+    {"name": "VTV",  "ticker": "VTV",  "ratio": 0.04, "country": "US", "type": "ETF"},
+    {"name": "TLT",  "ticker": "TLT",  "ratio": 0.025, "country": "US", "type": "ETF"},
+    {"name": "IEI",  "ticker": "IEI",  "ratio": 0.015, "country": "US", "type": "ETF"},
+    {"name": "SCHD", "ticker": "SCHD", "ratio": 0.04, "country": "US", "type": "ETF"},
 ]
 
 invest_portfolio = [
-    {"name": "TSM",        "ticker": "TSM",    "ratio": 0.25, "country": "US"},
-    {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.08, "country": "US"},
-    {"name": "TSLA",       "ticker": "TSLA",   "ratio": 0.06, "country": "US"},
-    {"name": "MSFT",       "ticker": "MSFT",   "ratio": 0.065, "country": "US"},
-    {"name": "AAPL",       "ticker": "AAPL",   "ratio": 0.065, "country": "US"},
-    {"name": "GOOGL",      "ticker": "GOOGL",  "ratio": 0.10, "country": "US"},
-    {"name": "AMD",        "ticker": "AMD",    "ratio": 0.065, "country": "US"},
-    {"name": "AMZN",       "ticker": "AMZN",   "ratio": 0.065, "country": "US"},
-    {"name": "SK하이닉스", "ticker": "000660.KS", "ratio": 0.20, "country": "KR"},
-    {"name": "현대차",     "ticker": "005380.KS", "ratio": 0.05, "country": "KR"},
+    {"name": "TSM",        "ticker": "TSM",    "ratio": 0.25, "country": "US", "type": "US"},
+    {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.08, "country": "US", "type": "US"},
+    {"name": "TSLA",       "ticker": "TSLA",   "ratio": 0.06, "country": "US", "type": "US"},
+    {"name": "MSFT",       "ticker": "MSFT",   "ratio": 0.065, "country": "US", "type": "US"},
+    {"name": "AAPL",       "ticker": "AAPL",   "ratio": 0.065, "country": "US", "type": "US"},
+    {"name": "GOOGL",      "ticker": "GOOGL",  "ratio": 0.10, "country": "US", "type": "US"},
+    {"name": "AMD",        "ticker": "AMD",    "ratio": 0.065, "country": "US", "type": "US"},
+    {"name": "AMZN",       "ticker": "AMZN",   "ratio": 0.065, "country": "US", "type": "US"},
+    {"name": "SK하이닉스", "ticker": "000660.KS", "ratio": 0.20, "country": "KR", "type": "KR"},
+    {"name": "현대차",     "ticker": "005380.KS", "ratio": 0.05, "country": "KR", "type": "KR"},
 ]
 
 all_stocks = fixed_portfolio + invest_portfolio
+all_tickers = [p['ticker'] for p in all_stocks] + [SAMSUNG_TICKER, "KRW=X"]
+
 brand_meta = {
-    "TSM": {"name": "📱 TSM", "color": "#8A5A5A"},
-    "NVDA": {"name": "🤖 NVDA", "color": "#76B900"},
-    "TSLA": {"name": "🚗 TSLA", "color": "#E31937"},
-    "MSFT": {"name": "🪟 MSFT", "color": "#F34F1C"},
-    "AAPL": {"name": "🍎 AAPL", "color": "#A2AAAD"},
-    "GOOGL": {"name": "🔍 GOOGL", "color": "#4285F4"},
-    "AMD": {"name": "💻 AMD", "color": "#ED1C24"},
-    "AMZN": {"name": "🛒 AMZN", "color": "#FF9900"},
-    "SK하이닉스": {"name": "💾 SK하이닉스", "color": "#E60012"},
-    "현대차": {"name": "🚙 현대차", "color": "#002C5F"},
-    "삼성전자": {"name": "🔒 삼성전자", "color": "#1428A0"},
-    "GLDM": {"name": "🥇 GLDM", "color": "#FFD700"},
-    "VTV": {"name": "🏦 VTV", "color": "#00509E"},
-    "TLT": {"name": "📜 TLT", "color": "#0076CE"},
-    "IEI": {"name": "📄 IEI", "color": "#0093D0"},
-    "SCHD": {"name": "💸 SCHD", "color": "#005A9C"},
+    "TSM": {"name": "📱 TSM", "color": "#8A5A5A"}, "NVDA": {"name": "🤖 NVDA", "color": "#76B900"},
+    "TSLA": {"name": "🚗 TSLA", "color": "#E31937"}, "MSFT": {"name": "🪟 MSFT", "color": "#F34F1C"},
+    "AAPL": {"name": "🍎 AAPL", "color": "#A2AAAD"}, "GOOGL": {"name": "🔍 GOOGL", "color": "#4285F4"},
+    "AMD": {"name": "💻 AMD", "color": "#ED1C24"}, "AMZN": {"name": "🛒 AMZN", "color": "#FF9900"},
+    "SK하이닉스": {"name": "💾 SK하이닉스", "color": "#E60012"}, "현대차": {"name": "🚙 현대차", "color": "#002C5F"},
+    "삼성전자": {"name": "🔒 삼성전자", "color": "#1428A0"}, "GLDM": {"name": "🥇 GLDM", "color": "#FFD700"},
+    "VTV": {"name": "🏦 VTV", "color": "#00509E"}, "TLT": {"name": "📜 TLT", "color": "#0076CE"},
+    "IEI": {"name": "📄 IEI", "color": "#0093D0"}, "SCHD": {"name": "💸 SCHD", "color": "#005A9C"},
     "예수금": {"name": "💵 예수금", "color": "#85BB65"}
 }
 
@@ -65,109 +65,222 @@ def get_brand(raw_name):
     return brand_meta.get(key, {"name": raw_name, "color": "#9E9E9E"})
 
 # ==========================================
-# 📊 데이터 엔진 (Batch Processing)
+# 2. UI 구성 (입력 패널 및 헤더)
 # ==========================================
-@st.cache_data(ttl=600)
-def fetch_all_data(tickers):
-    """모든 티커의 데이터를 한 번에 가져와서 속도 최적화"""
-    data = yf.download(tickers, period="5d", interval="1d", progress=False)
-    # MultiIndex 처리
-    if isinstance(data.columns, pd.MultiIndex):
-        return data
-    return data
+st.set_page_config(page_title="퀀트 터미널 Pro", page_icon="📈", layout="wide")
+st.title("📈 퀀트 포트폴리오 터미널 Pro")
 
-def calculate_stock_metrics(ticker, country, full_df, exc_rate):
-    """Batch 데이터에서 특정 종목의 지표 추출"""
-    try:
-        hist = full_df.xs(ticker, axis=1, level=1) if isinstance(full_df.columns, pd.MultiIndex) else full_df
-        
-        # 최신 종가(실시간에 가까운)와 전일 종가 추출
-        close_prices = hist['Close'].dropna()
-        if len(close_prices) < 3: return 0, 0, 0, 0, 0
-        
-        curr_p = close_prices.iloc[-1]
-        prev_p = close_prices.iloc[-2]
-        d2_p = close_prices.iloc[-3]
-        
-        change_pct = ((curr_p - prev_p) / prev_p) * 100
-        prev_change_pct = ((prev_p - d2_p) / d2_p) * 100
-        
-        return curr_p, change_pct, prev_p, prev_change_pct, d2_p
-    except:
-        return 0, 0, 0, 0, 0
+with st.container():
+    st.subheader("⚙️ 자산 및 수량 세팅")
+    params = st.query_params
+    input_cash = st.number_input("💵 현재 예수금(원화)", min_value=0, value=int(params.get("cash", "10000000")), step=100000)
+    holdings_input = st.text_input("🔢 보유 수량 (띄어쓰기 구분, 15종목)", value=params.get("holdings", ""))
+    execute_btn = st.button("분석 실행 🚀", type="primary", use_container_width=True)
+
+st.write("---")
+
+kst = timezone(timedelta(hours=9))
+now = datetime.now(kst)
+exc_rate_val = yf.Ticker("KRW=X").fast_info.get('last_price', 1400.0)
+
+# 상단 전광판: 날짜 | 총자산 | 시간 | 환율
+h1, h2, h3, h4 = st.columns(4)
+with h1: st.info(f"**📅 날짜**\n### {now.strftime('%Y-%m-%d')}")
+with h2: st.info(f"**💰 현재 총자산**\n### {st.session_state.total_asset:,.0f}원")
+with h3: st.info(f"**⏰ 시간**\n### {now.strftime('%H:%M KST')}")
+with h4: st.info(f"**💵 환율(USD/KRW)**\n### {exc_rate_val:,.1f}원")
 
 # ==========================================
-# 🖥️ UI 레이아웃
-# ==========================================
-st.set_page_config(page_title="P-Quant Terminal", page_icon="📈", layout="wide")
-st.title("📈 퀀트 포트폴리오 터미널 (V2.0)")
-
-# 입력 사이드바 또는 상단 패널
-with st.expander("⚙️ 자산 및 수량 세팅", expanded=not st.session_state.analyzed):
-    col1, col2 = st.columns(2)
-    with col1:
-        input_cash = st.number_input("💵 원화 예수금 총액", value=10000000, step=100000)
-    with col2:
-        sam_qty = st.number_input("🔒 삼성전자 보유 수량", value=41, step=1)
-    
-    holdings_input = st.text_input("🔢 종목 수량 (공백 구분)", placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 200 50")
-    execute_btn = st.button("실시간 분석 및 시트 기록 🚀", type="primary", use_container_width=True)
-
-# 환율 및 시간 정보 (기존 로직 유지)
-exc_rate = yf.Ticker("KRW=X").fast_info['last_price']
-st.write(f"현재 환율: **{exc_rate:,.1f}원** | KST: **{datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M')}**")
-
-# ==========================================
-# ⚙️ 실행 로직
+# 3. 분석 엔진
 # ==========================================
 if execute_btn:
-    with st.spinner('데이터 일괄 로딩 중...'):
-        all_tickers = [s['ticker'] for s in all_stocks] + [SAMSUNG_TICKER, "KRW=X"]
-        full_data = fetch_all_data(all_tickers)
-        
-        # 결과 저장을 위한 리스트
-        stock_results = []
-        total_prev_asset = input_cash
-        
-        # 삼성전자 계산
-        s_p, s_c, s_prev, s_prev_c, s_d2 = calculate_stock_metrics(SAMSUNG_TICKER, "KR", full_data, 1)
-        sam_amt = s_p * sam_qty
-        total_prev_asset += (s_prev * sam_qty)
-        
-        # 개별 종목 계산
-        user_holdings = list(map(int, holdings_input.split())) if holdings_input else [0]*len(all_stocks)
-        current_stock_assets = sam_amt
-        
-        for i, p in enumerate(all_stocks):
-            price, pct, prev, prev_pct, d2 = calculate_stock_metrics(p['ticker'], p['country'], full_data, exc_rate)
-            qty = user_holdings[i] if i < len(user_holdings) else 0
-            
-            p_krw = price * exc_rate if p['country'] == "US" else price
-            my_amt = qty * p_krw
-            current_stock_assets += my_amt
-            total_prev_asset += (prev * (exc_rate if p['country']=="US" else 1) * qty)
-            
-            stock_results.append({
-                "ticker": p['ticker'], "price_krw": p_krw, "price_usd": price if p['country']=="US" else 0,
-                "my_amt": my_amt, "change_pct": pct, "prev_change_pct": prev_pct, "qty": qty
-            })
+    st.query_params["cash"] = str(input_cash)
+    st.query_params["holdings"] = holdings_input
+    try:
+        user_h = list(map(int, holdings_input.split())) if holdings_input else [0]*len(all_stocks)
+        if len(user_h) < len(all_stocks): user_h += [0]*(len(all_stocks)-len(user_h))
+    except: st.error("수량 입력 오류"); st.stop()
 
-        # 세션 상태 업데이트 (정리된 데이터 저장)
-        st.session_state.total_asset = current_stock_assets + input_cash
-        st.session_state.stock_data = stock_results
-        st.session_state.sam_info = {"price": s_p, "amt": sam_amt, "change": s_c, "prev_change": s_prev_c, "qty": sam_qty}
-        st.session_state.analyzed = True
+    with st.spinner('🚀 실시간 데이터 분석 중...'):
+        data_2d = yf.download(all_tickers, period="2d", threads=True, progress=False)
+        df_close = data_2d['Close']
+        
+        curr_stock_val = 0; t_profit = 0; t_prev_a = input_cash; cache = []
+        cat_c = {"US":0,"KR":0,"ETF":0}; cat_p = {"US":0,"KR":0,"ETF":0}
+
+        def process_stock(ticker, qty, country):
+            prices = df_close[ticker].ffill().dropna()
+            p_curr = prices.iloc[-1] if not prices.empty else 0
+            p_prev = prices.iloc[-2] if len(prices) >= 2 else p_curr
+            rate = exc_rate_val if country == "US" else 1
+            cur_val = qty * p_curr * rate
+            pre_val = qty * p_prev * rate
+            cp = ((p_curr - p_prev) / p_prev * 100) if p_prev > 0 else 0
+            return p_curr * rate, cp, cur_val - pre_val, cur_val, pre_val
+
+        # 삼성전자 (Fixed)
+        sam_p_krw, sam_cp, sam_prof, sam_val, sam_pre = process_stock(SAMSUNG_TICKER, SAMSUNG_QTY, "KR")
+        curr_stock_val += sam_val; t_profit += sam_prof; t_prev_a += sam_pre
+        cat_c["KR"] += sam_val; cat_p["KR"] += sam_pre
+
+        # 나머지 종목
+        for i, p in enumerate(all_stocks):
+            p_krw, cp, prof, s_val, s_p_val = process_stock(p['ticker'], user_h[i], p['country'])
+            curr_stock_val += s_val; t_profit += prof; t_prev_a += s_p_val
+            cat_c[p.get('type', 'US')] += s_val; cat_p[p.get('type', 'US')] += s_p_val
+            cache.append({"price_krw": p_krw, "my_amt": s_val, "cp": cp, "profit": prof, "type": p.get('type', 'US'), "ratio": p['ratio']})
+
+        total_asset = curr_stock_val + input_cash
+        st.session_state.total_asset = total_asset
+        st.session_state.rebalance_budget = total_asset - sam_val # 삼성전자 제외 예산
+        
+        df_hist = yf.download(all_tickers, period="3y", threads=True, progress=False)
+        df_5m = yf.download(all_tickers, period="2d", interval="5m", threads=True, progress=False)
+
+        st.session_state.update({
+            "t_profit": t_profit, "t_cp": (t_profit/t_prev_a*100) if t_prev_a > 0 else 0,
+            "sam_amt": sam_val, "sam_price": sam_p_krw, "sam_cp": sam_cp, "sam_profit": sam_prof,
+            "cache": cache, "user_h": user_h, "input_cash": input_cash,
+            "cat_stats": {"US": [cat_c["US"],cat_p["US"]], "KR": [cat_c["KR"],cat_p["KR"]], "ETF": [cat_c["ETF"],cat_p["ETF"]]},
+            "df_hist": df_hist, "df_5m": df_5m, "analyzed": True
+        })
         st.rerun()
 
 # ==========================================
-# 📊 출력부 (Dataframe Styling)
+# 4. 필터링 및 표 출력
 # ==========================================
 if st.session_state.analyzed:
-    st.subheader(f"📊 총 자산: {st.session_state.total_asset:,.0f}원")
+    st.subheader("📑 종목별 실시간 현황")
     
-    # 여기에 기존에 작성하신 정렬 버튼 및 df_stocks 생성 로직을 적용하시면 됩니다.
-    # (코드 가독성을 위해 스타일링 함수와 테이블 출력은 기존 구조를 유지하시면 완벽합니다!)
+    # [필터 버튼]
+    f_col1, f_col2, f_col3, f_col4, _ = st.columns([1,1,1,1,6])
+    if f_col1.button("🌐 전체", use_container_width=True): st.session_state.view_filter = "전체"
+    if f_col2.button("🇰🇷 국장", use_container_width=True): st.session_state.view_filter = "KR"
+    if f_col3.button("🇺🇸 미장", use_container_width=True): st.session_state.view_filter = "US"
+    if f_col4.button("🛡️ 현금성", use_container_width=True): st.session_state.view_filter = "ETF"
+
+    # [정렬 버튼]
+    st.markdown("**↕️ 정렬 기준**")
+    s1, s2, s3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
+    if s1.button("💰 실제금액순", use_container_width=True): st.session_state.sort_by = "실제금액숫자"
+    if s2.button("📈 등락률순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
+    if s3.button("💸 오늘수익순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
+
+    rows = []
+    budget_invest = st.session_state.rebalance_budget * 0.63
+
+    # 삼성전자 필터 처리
+    if st.session_state.view_filter in ["전체", "KR"]:
+        rows.append({"종목": "🔒 삼성전자", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", "등락률": f"{st.session_state.sam_cp:+.2f}%", "오늘수익": f"{st.session_state.sam_profit:+,.0f}원", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}", "실제금액": f"{st.session_state.sam_amt:,.0f}원", "실행": "🔒 고정", "등락률숫자": st.session_state.sam_cp, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit})
+
+    # 15종목 매수/매도 로직 (정밀 수정 완료)
+    for i, p in enumerate(all_stocks):
+        c = st.session_state.cache[i]; my_qty = st.session_state.user_h[i]
+        if st.session_state.view_filter != "전체" and c['type'] != st.session_state.view_filter: continue
+        
+        # 목표 수량 계산
+        target_amt = st.session_state.rebalance_budget * c['ratio'] if i < 5 else budget_invest * c['ratio']
+        target_qty = round(target_amt / c['price_krw']) if c['price_krw'] > 0 else 0
+        diff = target_qty - my_qty
+        action = f"🔴 {int(diff)}주 매수" if diff > 0 else (f"🔵 {int(abs(diff))}주 매도" if diff < 0 else "🟢 유지")
+
+        rows.append({"종목": get_brand(p['name'])["name"], "현재가(₩)": f"{c['price_krw']:,.0f}원", "등락률": f"{c['cp']:+.2f}%", "오늘수익": f"{c['profit']:+,.0f}원", "실제비중": f"{(c['my_amt']/st.session_state.total_asset):.1%}", "실제금액": f"{c['my_amt']:,.0f}원", "실행": action, "등락률숫자": c['cp'], "실제금액숫자": c['my_amt'], "오늘수익숫자": c['profit']})
+
+    df_main = pd.DataFrame(rows).sort_values(by=st.session_state.sort_by, ascending=False)
     
-    # [Tip] 엔지니어용 추가 차트 제안
-    # st.line_chart(...) 등을 이용해 포트폴리오의 '변동성'이나 '섹터 비중'을 시각화하면 
-    # Spotfire 대시보드 부럽지 않은 터미널이 됩니다.
+    # [필터별 합계 행 추가]
+    f_sum_prof = df_main['오늘수익숫자'].sum()
+    f_sum_amt = df_main['실제금액숫자'].sum()
+    summary_row = pd.DataFrame([{"종목": "✨ 선택 분류 합계", "오늘수익": f"{f_sum_prof:+,.0f}원", "실제비중": f"{(f_sum_amt/st.session_state.total_asset):.1%}", "실제금액": f"{f_sum_amt:,.0f}원", "실행": "-"}])
+    df_final = pd.concat([df_main, summary_row], ignore_index=True)
+
+    def color_v(val):
+        c = '#2E7D32' if '+' in str(val) or '매수' in str(val) else ('#C2185B' if '-' in str(val) or '매도' in str(val) else 'black')
+        return f'color: {c}; font-weight: bold;'
+
+    st.dataframe(df_final.style.apply(lambda r: ['background-color: #F8F9FA' if r['종목'] == '✨ 선택 분류 합계' else '' for _ in r], axis=1).map(color_v, subset=['등락률','오늘수익','실행']).set_properties(**{'text-align': 'center'}),
+                 column_order=["종목","현재가(₩)","등락률","오늘수익","실제비중","실제금액","실행"],
+                 column_config={"종목": st.column_config.TextColumn("종목", width=160)},
+                 hide_index=True, use_container_width=True, height=600)
+
+    # --- 요약표 (해외 ➔ 국내 ➔ 현금성 ➔ 예수금 ➔ 총합) ---
+    st.write("---")
+    st.subheader("📋 전체 포트폴리오 요약 (100% 기준)")
+    sum_rows = []
+    for cd, lb in [("US","🌎 해외주식 총합"), ("KR","🇰🇷 국내주식 총합"), ("ETF","🛡️ 현금성ETF 총합")]:
+        v = st.session_state.cat_stats[cd]; p = v[0]-v[1]
+        sum_rows.append({"종목":lb, "등락률":f"{(p/v[1]*100):+.2f}%" if v[1]>0 else "0%", "오늘수익":f"{p:+,.0f}원", "실제비중":f"{v[0]/st.session_state.total_asset:.1%}", "실제금액":f"{v[0]:,.0f}원"})
+    sum_rows.append({"종목":"💵 예수금 (현금)", "등락률":"-", "오늘수익":"-", "실제비중":f"{st.session_state.input_cash/st.session_state.total_asset:.1%}", "실제금액":f"{st.session_state.input_cash:,.0f}원"})
+    sum_rows.append({"종목":"📊 포트폴리오 총합", "등락률":f"{st.session_state.t_cp:+.2f}%", "오늘수익":f"{st.session_state.t_profit:+,.0f}원", "실제비중":"100.0%", "실제금액":f"{st.session_state.total_asset:,.0f}원"})
+    
+    st.dataframe(pd.DataFrame(sum_rows).style.apply(lambda r: ['background-color: #EEEEEE' if r['종목'] == '📊 포트폴리오 총합' else '' for _ in r], axis=1).map(color_v, subset=['등락률','오늘수익']).set_properties(**{'text-align': 'center'}),
+                 hide_index=True, use_container_width=True)
+
+    # ==========================================
+    # 5. 차트 분석 센터
+    # ==========================================
+    st.write("---")
+    st.subheader("📊 차트 분석 센터")
+    
+    def calc_ohlc(df, t_list, q_dict):
+        res = pd.DataFrame(0.0, index=df.index, columns=['Open','High','Low','Close'])
+        for t in t_list:
+            qty = q_dict.get(t, 0); r = exc_rate_val if (".KS" not in t and t != SAMSUNG_TICKER) else 1
+            for col in res.columns: res[col] += df[col][t].ffill().bfill() * qty * r
+        return res + st.session_state.input_cash
+
+    qtys = {SAMSUNG_TICKER: SAMSUNG_QTY}
+    for i, p in enumerate(all_stocks): qtys[p['ticker']] = st.session_state.user_h[i]
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["🕒 2일 5분봉", "🇰🇷 국장 일봉", "🇺🇸 미장 일봉", "📈 전체 누적 영역"])
+
+    def add_lines(fig, ohlc_df, title):
+        ath = ohlc_df['High'].max(); ath_d = ohlc_df['High'].idxmax()
+        low_3m = ohlc_df['Low'].tail(60).min(); low_d = ohlc_df['Low'].tail(60).idxmin()
+        curr = st.session_state.total_asset if title=="전체" else ohlc_df['Close'].iloc[-1]
+        fig.add_hline(y=ath, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_hline(y=low_3m, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_hline(y=curr, line_dash="dot", line_color="red", opacity=0.8)
+        fig.add_annotation(x=ath_d, y=ath, text=f"🚩 전고점", showarrow=True)
+        # ★ 연 구분선 (검정 실선) & 월 구분선 (점선)
+        f_m = [g.index[0] for _, g in ohlc_df.groupby([ohlc_df.index.year, ohlc_df.index.month])]
+        f_y = [g.index[0] for _, g in ohlc_df.groupby(ohlc_df.index.year)]
+        for d in f_m:
+            if d in f_y: fig.add_vline(x=d, line_dash="solid", line_color="black", line_width=2)
+            else: fig.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)")
+        fig.update_yaxes(tickformat=",.0f")
+        return fig
+
+    with tab1:
+        w5 = calc_ohlc(st.session_state.df_5m, all_tickers, qtys)
+        st.plotly_chart(add_lines(go.Figure(data=[go.Candlestick(x=w5.index, open=w5['Open'], high=w5['High'], low=w5['Low'], close=w5['Close'])]), w5, "전체"), use_container_width=True)
+    with tab2:
+        kr_tkrs = [SAMSUNG_TICKER] + [p['ticker'] for p in all_stocks if p['country']=='KR']
+        w_kr = calc_ohlc(st.session_state.df_hist, kr_tkrs, qtys)
+        st.plotly_chart(add_lines(go.Figure(data=[go.Candlestick(x=w_kr.index, open=w_kr['Open'], high=w_kr['High'], low=w_kr['Low'], close=w_kr['Close'])]), w_kr, "국장"), use_container_width=True)
+    with tab3:
+        us_tkrs = [p['ticker'] for p in all_stocks if p['country']=='US']
+        w_us = calc_ohlc(st.session_state.df_hist, us_tkrs, qtys)
+        st.plotly_chart(add_lines(go.Figure(data=[go.Candlestick(x=w_us.index, open=w_us['Open'], high=w_us['High'], low=w_us['Low'], close=w_us['Close'])]), w_us, "미장"), use_container_width=True)
+    with tab4:
+        dfh = st.session_state.df_hist; idx = dfh.index; s_ca = pd.Series(st.session_state.input_cash, index=idx)
+        s_et = calc_ohlc(dfh, [p['ticker'] for p in fixed_portfolio], qtys)['Close'] - st.session_state.input_cash
+        s_u = calc_ohlc(dfh, [p['ticker'] for p in invest_portfolio if p['country']=='US'], qtys)['Close'] - st.session_state.input_cash
+        s_k = calc_ohlc(dfh, [SAMSUNG_TICKER]+[p['ticker'] for p in invest_portfolio if p['country']=='KR'], qtys)['Close'] - st.session_state.input_cash
+        fa = go.Figure()
+        fa.add_trace(go.Scatter(x=idx, y=s_ca, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
+        fa.add_trace(go.Scatter(x=idx, y=s_et, mode='none', fill='tonexty', name='🛡️ 현금성', stackgroup='one', fillcolor='#FFD54F'))
+        fa.add_trace(go.Scatter(x=idx, y=s_u, mode='none', fill='tonexty', name='🌎 미장', stackgroup='one', fillcolor='#F06292'))
+        fa.add_trace(go.Scatter(x=idx, y=s_k, mode='none', fill='tonexty', name='🇰🇷 국장', stackgroup='one', fillcolor='#64B5F6'))
+        st.plotly_chart(add_lines(fa, calc_ohlc(dfh, all_tickers, qtys), "전체"), use_container_width=True)
+
+    # 파이차트
+    st.write("---")
+    st.subheader("🍕 현재 자산 구성 비율")
+    p_data = [{"종목":get_brand("삼성전자")["name"], "금액":st.session_state.sam_amt}]
+    for i, p in enumerate(all_stocks):
+        amt = st.session_state.cache[i]['my_amt']
+        if amt > 0: p_data.append({"종목":get_brand(p['name'])["name"], "금액":amt})
+    p_data.append({"종목":"💵 예수금", "금액":st.session_state.input_cash})
+    st.plotly_chart(px.pie(pd.DataFrame(p_data), values='금액', names='종목', hole=0.4, color='종목',
+                   color_discrete_map={v["name"]: v["color"] for v in brand_meta.values()}, height=600), use_container_width=True)
