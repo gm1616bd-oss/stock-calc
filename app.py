@@ -156,10 +156,18 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-head_col1, head_col2, head_col3 = st.columns(3)
-with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
-with head_col2: st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
+# === 여기(컬럼 분할) 수정됨 ===
+head_col1, head_col2, head_col3, head_col4 = st.columns(4)
+with head_col1: 
+    st.info(f"**📅 오늘 날짜**\n### {date_str}")
+with head_col2:
+    if st.session_state.analyzed and "total_asset" in st.session_state:
+        st.info(f"**💰 총 자산**\n### {st.session_state.total_asset:,.0f}원")
+    else:
+        st.info(f"**💰 총 자산**\n### 분석 전")
 with head_col3: 
+    st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
+with head_col4: 
     st.info(f"**💵 실시간 환율 (KRW/USD)**\n### {exc_rate:,.1f}원")
     trend_df = get_exchange_trend()
     if trend_df is not None and not trend_df.empty:
