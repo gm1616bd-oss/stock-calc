@@ -490,7 +490,6 @@ if st.session_state.analyzed:
                  .map(style_d1_color, subset=['D-1'])
                  .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        # 종목 컬럼의 너비를 딱 맞게 축소 (110으로 설정)
         column_config={"종목": st.column_config.TextColumn("종목", width=110)},
         hide_index=True, use_container_width=False, height=650 
     )
@@ -504,7 +503,6 @@ if st.session_state.analyzed:
                   .map(style_d1_color, subset=['D-1'])
                   .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        # 여기도 동일하게 110으로 설정
         column_config={"종목": st.column_config.TextColumn("종목", width=110)},
         hide_index=True, use_container_width=False, height=250 
     )
@@ -565,17 +563,15 @@ if st.session_state.analyzed:
             last_date = df_hist.index[-1]
             zoom_start = last_date - pd.Timedelta(days=90)
             
+            # (수정) Y축 최솟값/최댓값 강제 고정 해제 -> 아래로 스크롤할 때 잘리지 않도록 변수만 설정하고 주입 X
             mask = (df_hist.index >= zoom_start)
             if mask.any():
                 low_3m_val = hist_L[mask].min()
                 low_3m_date = hist_L[mask].idxmin()
-                max_y = hist_H[mask].max() * 1.10
             else:
                 low_3m_val = hist_L.min()
                 low_3m_date = hist_L.idxmin()
-                max_y = hist_H.max() * 1.10
 
-            min_y = max(0, low_3m_val * 0.98) 
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
@@ -595,10 +591,10 @@ if st.session_state.analyzed:
                 fig_candle.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
                 fig_candle.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
-                fig_candle.update_yaxes(tickformat=",.0f")
-                # rangeslider_visible=True 추가하여 하단 레인지 뷰어 활성화
+                fig_candle.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) # y축 오토스케일링 허용
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])]) 
-                fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
+                # (수정) yaxis_range 속성 제거로 y축이 자동으로 맞춰지게 함
+                fig_candle.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
                 for d in first_days_month: 
                     if d in first_days_year:
@@ -623,10 +619,10 @@ if st.session_state.analyzed:
                 fig_area.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
                 fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
-                fig_area.update_yaxes(tickformat=",.0f")
-                # rangeslider_visible=True 추가
+                fig_area.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) # y축 오토스케일링 허용
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])])
-                fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                # (수정) yaxis_range 속성 제거
+                fig_area.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
                 for d in first_days_month: 
                     if d in first_days_year:
