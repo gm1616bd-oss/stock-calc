@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
 if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
+if "total_asset" not in st.session_state: st.session_state.total_asset = 0
 
 # ==========================================
 # 🔑 구글 시트 연결 설정
@@ -156,10 +157,12 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-head_col1, head_col2, head_col3 = st.columns(3)
+# --- 전광판 4열 구성 (날짜 | 총자산 | 시간 | 환율) ---
+head_col1, head_col2, head_col3, head_col4 = st.columns(4)
 with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
-with head_col2: st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
-with head_col3: 
+with head_col2: st.info(f"**💰 현재 총자산**\n### {st.session_state.total_asset:,.0f}원")
+with head_col3: st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
+with head_col4: 
     st.info(f"**💵 실시간 환율 (KRW/USD)**\n### {exc_rate:,.1f}원")
     trend_df = get_exchange_trend()
     if trend_df is not None and not trend_df.empty:
@@ -293,7 +296,7 @@ if execute_btn:
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부 (표 분리, D-1 열 추가, UI개선)
+# 5. 화면 출력부
 # ==========================================
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
@@ -446,7 +449,7 @@ if st.session_state.analyzed:
                  .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
         column_config={"종목": st.column_config.TextColumn("종목", width=160)},
-        hide_index=True, use_container_width=False, height=650 
+        hide_index=True, use_container_width=True, height=650 
     )
 
     st.write("---")
@@ -459,7 +462,7 @@ if st.session_state.analyzed:
                   .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
         column_config={"종목": st.column_config.TextColumn("종목", width=160)},
-        hide_index=True, use_container_width=False, height=250 
+        hide_index=True, use_container_width=True, height=250 
     )
 
     # ==========================================
@@ -497,22 +500,6 @@ if st.session_state.analyzed:
                 if hist_H.iloc[-1] < real_time_total: hist_H.iloc[-1] = real_time_total
                 if hist_L.iloc[-1] > real_time_total: hist_L.iloc[-1] = real_time_total
 
-            s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
-            s_etf = pd.Series(0, index=df_hist.index)
-            s_us = pd.Series(0, index=df_hist.index)
-            s_kr = pd.Series(0, index=df_hist.index)
-            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            
-            for i, p in enumerate(all_stocks):
-                qty = st.session_state.user_holdings[i]
-                if qty > 0:
-                    tkr = p['ticker']
-                    if p['country'] == 'US': val = df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
-                    else: val = df_hist['Close'][tkr].ffill().bfill() * qty
-                    if i < 5: s_etf += val
-                    elif p['country'] == 'US': s_us += val
-                    else: s_kr += val
-
             ath_val = hist_H.max()
             ath_date = hist_H.idxmax()
             last_date = df_hist.index[-1]
@@ -522,18 +509,16 @@ if st.session_state.analyzed:
             if mask.any():
                 low_3m_val = hist_L[mask].min()
                 low_3m_date = hist_L[mask].idxmin()
-                max_y = hist_H[mask].max() * 1.10
             else:
                 low_3m_val = hist_L.min()
                 low_3m_date = hist_L.idxmin()
-                max_y = hist_H.max() * 1.10
 
-            min_y = max(0, low_3m_val * 0.98) 
+            min_y = low_3m_val * 0.95
+            max_y = ath_val * 1.05
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
-            # ★ 월 구분선과 연 구분선 분리!
-            first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
+            # 연 구분선 데이터 추출
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
             with tab1:
@@ -544,49 +529,37 @@ if st.session_state.analyzed:
                 fig_candle.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
                 fig_candle.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
                 fig_candle.add_hline(y=curr_val, line_dash="dash", line_color="red", opacity=0.7)
-
-                fig_candle.add_annotation(x=ath_date, y=ath_val, text=f"📅 {ath_date.strftime('%y년 %m월 %d일')}<br>🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
-                fig_candle.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
-                fig_candle.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
+                
+                for d in first_days_year:
+                    fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
 
                 fig_candle.update_yaxes(tickformat=",.0f")
-                fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
-                fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
-                
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
-                for d in first_days_month: 
-                    if d in first_days_year:
-                        fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else:
-                        fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], height=500, margin=dict(l=0, r=0, t=30, b=0))
                 st.plotly_chart(fig_candle, use_container_width=True)
 
             with tab2:
-                fig_area = go.Figure()
-                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
-                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_etf, mode='none', fill='tonexty', name='🛡️ 현금성ETF', stackgroup='one', fillcolor='#FFD54F'))
-                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_us, mode='none', fill='tonexty', name='🌎 해외주식', stackgroup='one', fillcolor='#F06292'))
-                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_kr, mode='none', fill='tonexty', name='🇰🇷 국내주식', stackgroup='one', fillcolor='#64B5F6'))
-                fig_area.add_trace(go.Scatter(x=df_hist.index, y=hist_C, mode='lines', name='📈 총자산 흐름', line=dict(color='#222222', width=2)))
+                s_ca = pd.Series(st.session_state.input_cash, index=df_hist.index)
+                s_et, s_u, s_k = pd.Series(0, index=df_hist.index), pd.Series(0, index=df_hist.index), pd.Series(0, index=df_hist.index)
+                s_k += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+                for i, p in enumerate(all_stocks):
+                    q = st.session_state.user_holdings[i]
+                    if q > 0:
+                        val = df_hist['Close'][p['ticker']].ffill().bfill() * q * (exc_rate if p['country']=='US' else 1)
+                        if i < 5: s_et += val
+                        elif p['country'] == 'US': s_u += val
+                        else: s_k += val
                 
-                fig_area.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
-                fig_area.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
-                fig_area.add_hline(y=curr_val, line_dash="dash", line_color="red", opacity=0.7)
-
-                fig_area.add_annotation(x=ath_date, y=ath_val, text=f"📅 {ath_date.strftime('%y년 %m월 %d일')}<br>🚩 전고점: {ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
-                fig_area.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
-                fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
+                fig_area = go.Figure()
+                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_ca, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
+                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_et, mode='none', fill='tonexty', name='🛡️ 현금성ETF', stackgroup='one', fillcolor='#FFD54F'))
+                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_u, mode='none', fill='tonexty', name='🌎 해외주식', stackgroup='one', fillcolor='#F06292'))
+                fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_k, mode='none', fill='tonexty', name='🇰🇷 국내주식', stackgroup='one', fillcolor='#64B5F6'))
+                
+                for d in first_days_year:
+                    fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
 
                 fig_area.update_yaxes(tickformat=",.0f")
-                fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
-                fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
-                for d in first_days_month: 
-                    if d in first_days_year:
-                        fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else:
-                        fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], height=500, margin=dict(l=0, r=0, t=30, b=0))
                 st.plotly_chart(fig_area, use_container_width=True)
 
         except Exception as e:
@@ -605,10 +578,7 @@ if st.session_state.analyzed:
                 pie_data.append({"종목": get_brand("예수금")["name"], "금액": st.session_state.input_cash})
 
             df_pie = pd.DataFrame(pie_data)
-            custom_colors = {v["name"]: v["color"] for v in brand_meta.values()}
-
-            fig_pie = px.pie(df_pie, values='금액', names='종목', color='종목', color_discrete_map=custom_colors, hole=0.4)
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            fig_pie = px.pie(df_pie, values='금액', names='종목', color='종목', color_discrete_map={v["name"]: v["color"] for v in brand_meta.values()}, hole=0.4)
             fig_pie.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=530, showlegend=False) 
             st.plotly_chart(fig_pie, use_container_width=True)
         except Exception as e:
