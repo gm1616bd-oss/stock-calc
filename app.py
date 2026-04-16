@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
 if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
-if "filter_by" not in st.session_state: st.session_state.filter_by = "전체" # 필터 상태 초기화
+if "filter_by" not in st.session_state: st.session_state.filter_by = "전체"
 
 # ==========================================
 # 🔑 구글 시트 연결 설정
@@ -306,7 +306,6 @@ if execute_btn:
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
-    # --- 새로 추가된 버튼 구역 ---
     st.write("🔍 **종목 필터링**")
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     if col_f1.button("📋 전체 보기", use_container_width=True): st.session_state.filter_by = "전체"
@@ -329,14 +328,17 @@ if st.session_state.analyzed:
     sam_prev_change_str = f"▲ {st.session_state.sam_prev_change:.2f}%" if st.session_state.sam_prev_change > 0 else (f"▼ {abs(st.session_state.sam_prev_change):.2f}%" if st.session_state.sam_prev_change < 0 else "-")
     sam_profit_str = f"▲ {st.session_state.sam_profit:,.0f}원" if st.session_state.sam_profit > 0 else (f"▼ {abs(st.session_state.sam_profit):,.0f}원" if st.session_state.sam_profit < 0 else "-")
     
+    sam_actual_ratio_num = (st.session_state.sam_amt / st.session_state.total_asset) if st.session_state.total_asset > 0 else 0.0
+
     stock_rows.append({
         "종목": get_brand("삼성전자")["name"], "현재가($)": "-", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", 
         "D-1": sam_prev_change_str, "등락률": sam_change_str, "오늘수익": sam_profit_str,
-        "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
+        "목표비중": "-", "실제비중": f"{sam_actual_ratio_num:.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
         "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
         "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit,
-        "카테고리": "국장" # 필터용 카테고리
+        "목표비중숫자": 0.0, "실제비중숫자": sam_actual_ratio_num, "목표금액숫자": 0.0, # 요약 계산용 수치
+        "카테고리": "국장" 
     })
 
     for i, p in enumerate(all_stocks):
@@ -351,19 +353,23 @@ if st.session_state.analyzed:
 
         if i < 5: 
             target_amt = st.session_state.rebalance_budget * p['ratio']
-            display_target_ratio = f"{p['ratio']:.1%}"
+            target_ratio_num = p['ratio']
             category = "현금성"
         else: 
             target_amt = budget_invest * p['ratio']
-            display_target_ratio = f"{(0.63 * p['ratio']):.1%}"
+            target_ratio_num = 0.63 * p['ratio']
             category = "미장" if p['country'] == 'US' else "국장"
+
+        display_target_ratio = f"{target_ratio_num:.1%}"
 
         if price_krw > 0: target_qty = round(target_amt / price_krw)
         else: target_qty = 0
         actual_target_cost = target_qty * price_krw
         total_buy_cost += actual_target_cost
         
-        current_ratio = f"{(my_amt / st.session_state.total_asset):.1%}" if st.session_state.total_asset > 0 else "0.0%"
+        actual_ratio_num = my_amt / st.session_state.total_asset if st.session_state.total_asset > 0 else 0.0
+        current_ratio = f"{actual_ratio_num:.1%}"
+        
         diff = target_qty - my_qty
         if diff > 0: action = f"🔴 {int(diff)}주 매수"
         elif diff < 0: action = f"🔵 {int(abs(diff))}주 매도"
@@ -381,7 +387,8 @@ if st.session_state.analyzed:
             "목표금액": f"{actual_target_cost:,.0f}원", "실제금액": f"{my_amt:,.0f}원",
             "목표수량": str(int(target_qty)), "내보유": str(int(my_qty)), "실행": action,
             "등락률숫자": change_pct, "실제금액숫자": my_amt, "오늘수익숫자": today_profit,
-            "카테고리": category # 필터용 카테고리
+            "목표비중숫자": target_ratio_num, "실제비중숫자": actual_ratio_num, "목표금액숫자": actual_target_cost, # 요약 계산용 수치
+            "카테고리": category
         })
 
     # 데이터프레임 생성 및 필터 적용
@@ -389,8 +396,36 @@ if st.session_state.analyzed:
     if st.session_state.filter_by != "전체":
         df_stocks = df_stocks[df_stocks['카테고리'] == st.session_state.filter_by]
     
+    # 💡 요약(합계) 행을 위한 계산
+    sum_actual_amt = df_stocks['실제금액숫자'].sum()
+    sum_today_profit = df_stocks['오늘수익숫자'].sum()
+    sum_target_ratio = df_stocks['목표비중숫자'].sum()
+    sum_actual_ratio = df_stocks['실제비중숫자'].sum()
+    sum_target_amt = df_stocks['목표금액숫자'].sum()
+
+    prof_str = f"▲ {sum_today_profit:,.0f}원" if sum_today_profit > 0 else (f"▼ {abs(sum_today_profit):,.0f}원" if sum_today_profit < 0 else "-")
+    
+    summary_row = {
+        "종목": f"📊 [{st.session_state.filter_by}] 요약",
+        "현재가($)": "-",
+        "현재가(₩)": "-",
+        "D-1": "-",
+        "등락률": "-",
+        "오늘수익": prof_str,
+        "목표비중": f"{sum_target_ratio:.1%}",
+        "실제비중": f"{sum_actual_ratio:.1%}",
+        "목표금액": f"{sum_target_amt:,.0f}원",
+        "실제금액": f"{sum_actual_amt:,.0f}원",
+        "목표수량": "-",
+        "내보유": "-",
+        "실행": "-"
+    }
+
     # 정렬 및 불필요한 열 제거
-    df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '카테고리'])
+    df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '목표비중숫자', '실제비중숫자', '목표금액숫자', '카테고리'])
+    
+    # 💡 정렬이 끝난 후 맨 밑에 요약 줄 추가
+    df_stocks = pd.concat([df_stocks, pd.DataFrame([summary_row])], ignore_index=True)
 
     # --- 5-2. 요약표 생성 ---
     sum_rows = []
@@ -437,6 +472,7 @@ if st.session_state.analyzed:
     
     df_summary = pd.DataFrame(sum_rows)
 
+    # 💡 렌더링 시 색상 및 스타일 입히기 (요약 줄 전용 스타일 함수 추가)
     def style_change_color(val):
         val_str = str(val)
         if '▲' in val_str: return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;'
@@ -455,6 +491,12 @@ if st.session_state.analyzed:
         elif '매도' in str(val): color = '#1976D2'
         return f'color: {color}; font-weight: bold;'
 
+    def style_stock_dataframe(row):
+        # 방금 새로 생성한 '요약' 행이면 배경색 칠하기
+        if '요약' in str(row['종목']):
+            return ['background-color: #EEEEEE; font-weight: bold;'] * len(row)
+        return [''] * len(row)
+
     def style_summary_dataframe(row):
         bg_color = 'white'
         if '해외주식' in row['종목']: bg_color = '#FCE4EC'
@@ -466,7 +508,8 @@ if st.session_state.analyzed:
 
     st.subheader(f"📑 개별 종목 상세 현황 (현재 필터: {st.session_state.filter_by})")
     st.dataframe(
-        df_stocks.style.map(style_text_color, subset=['실행'])
+        df_stocks.style.apply(style_stock_dataframe, axis=1)  # 요약 줄 스타일
+                 .map(style_text_color, subset=['실행'])
                  .map(style_change_color, subset=['등락률', '오늘수익'])
                  .map(style_d1_color, subset=['D-1'])
                  .set_properties(**{'text-align': 'center'}),
