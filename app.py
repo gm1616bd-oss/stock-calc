@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
 if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
+if "filter_by" not in st.session_state: st.session_state.filter_by = "전체" # 필터 상태 초기화
 
 # ==========================================
 # 🔑 구글 시트 연결 설정
@@ -156,7 +157,6 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-# === 여기(컬럼 분할) 수정됨 ===
 head_col1, head_col2, head_col3, head_col4 = st.columns(4)
 with head_col1: 
     st.info(f"**📅 오늘 날짜**\n### {date_str}")
@@ -306,7 +306,15 @@ if execute_btn:
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
-    st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
+    # --- 새로 추가된 버튼 구역 ---
+    st.write("🔍 **종목 필터링**")
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    if col_f1.button("📋 전체 보기", use_container_width=True): st.session_state.filter_by = "전체"
+    if col_f2.button("🇰🇷 국장", use_container_width=True): st.session_state.filter_by = "국장"
+    if col_f3.button("🌎 미장", use_container_width=True): st.session_state.filter_by = "미장"
+    if col_f4.button("🛡️ 현금성(ETF)", use_container_width=True): st.session_state.filter_by = "현금성"
+    
+    st.write("↕️ **정렬 기준 선택**")
     col_btn1, col_btn2, col_btn3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
     if col_btn1.button("💰 실제금액 내림차순", use_container_width=True): st.session_state.sort_by = "실제금액숫자"
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
@@ -327,7 +335,8 @@ if st.session_state.analyzed:
         "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
         "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
-        "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit
+        "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit,
+        "카테고리": "국장" # 필터용 카테고리
     })
 
     for i, p in enumerate(all_stocks):
@@ -343,9 +352,11 @@ if st.session_state.analyzed:
         if i < 5: 
             target_amt = st.session_state.rebalance_budget * p['ratio']
             display_target_ratio = f"{p['ratio']:.1%}"
+            category = "현금성"
         else: 
             target_amt = budget_invest * p['ratio']
             display_target_ratio = f"{(0.63 * p['ratio']):.1%}"
+            category = "미장" if p['country'] == 'US' else "국장"
 
         if price_krw > 0: target_qty = round(target_amt / price_krw)
         else: target_qty = 0
@@ -369,10 +380,17 @@ if st.session_state.analyzed:
             "목표비중": display_target_ratio, "실제비중": current_ratio,
             "목표금액": f"{actual_target_cost:,.0f}원", "실제금액": f"{my_amt:,.0f}원",
             "목표수량": str(int(target_qty)), "내보유": str(int(my_qty)), "실행": action,
-            "등락률숫자": change_pct, "실제금액숫자": my_amt, "오늘수익숫자": today_profit
+            "등락률숫자": change_pct, "실제금액숫자": my_amt, "오늘수익숫자": today_profit,
+            "카테고리": category # 필터용 카테고리
         })
 
-    df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자'])
+    # 데이터프레임 생성 및 필터 적용
+    df_stocks = pd.DataFrame(stock_rows)
+    if st.session_state.filter_by != "전체":
+        df_stocks = df_stocks[df_stocks['카테고리'] == st.session_state.filter_by]
+    
+    # 정렬 및 불필요한 열 제거
+    df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '카테고리'])
 
     # --- 5-2. 요약표 생성 ---
     sum_rows = []
@@ -446,7 +464,7 @@ if st.session_state.analyzed:
         elif '포트폴리오 총합' in row['종목']: bg_color = '#EEEEEE'
         return [f'background-color: {bg_color}'] * len(row)
 
-    st.subheader("📑 개별 종목 상세 현황")
+    st.subheader(f"📑 개별 종목 상세 현황 (현재 필터: {st.session_state.filter_by})")
     st.dataframe(
         df_stocks.style.map(style_text_color, subset=['실행'])
                  .map(style_change_color, subset=['등락률', '오늘수익'])
@@ -540,7 +558,6 @@ if st.session_state.analyzed:
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
-            # ★ 월 구분선과 연 구분선 분리!
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
@@ -561,7 +578,6 @@ if st.session_state.analyzed:
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
                     if d in first_days_year:
                         fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
@@ -589,7 +605,6 @@ if st.session_state.analyzed:
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
                     if d in first_days_year:
                         fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
