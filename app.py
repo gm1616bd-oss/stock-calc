@@ -176,7 +176,7 @@ if execute_btn:
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
 
-    with st.spinner('실시간 시세 및 3년치 글로벌 차트 로딩 중... (약 15초 소요)'):
+    with st.spinner('실시간 시세 및 차트 로딩 중... (약 15~20초 소요)'):
         try: exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
         except: exchange_rate = 1400 
         
@@ -253,8 +253,16 @@ if execute_btn:
             try: requests.post(WEB_APP_URL, data={"date": now.strftime("%Y-%m-%d"), "asset": int(total_asset)})
             except: pass
 
+        # 3년치 글로벌 차트 다운로드
         tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER]
         df_hist = yf.download(tickers, period="3y", progress=False)
+
+        # 5분봉 데이터 다운로드 (최근 2일)
+        kr_tickers = [SAMSUNG_TICKER] + [p['ticker'] for p in all_stocks if p['country'] == 'KR']
+        us_tickers = [p['ticker'] for p in all_stocks if p['country'] == 'US']
+        
+        df_5m_kr = yf.download(kr_tickers, period="2d", interval="5m", progress=False)
+        df_5m_us = yf.download(us_tickers + ["KRW=X"], period="2d", interval="5m", progress=False)
 
         st.session_state.total_asset = total_asset
         st.session_state.rebalance_budget = total_asset - sam_amt
@@ -275,6 +283,8 @@ if execute_btn:
             "ETF": cat_cur["ETF"], "ETF_P": cat_prev["ETF"], "ETF_P2": cat_prev2["ETF"]
         }
         st.session_state.df_hist = df_hist
+        st.session_state.df_5m_kr = df_5m_kr
+        st.session_state.df_5m_us = df_5m_us
         st.session_state.analyzed = True
         st.rerun()
 
@@ -563,7 +573,6 @@ if st.session_state.analyzed:
             last_date = df_hist.index[-1]
             zoom_start = last_date - pd.Timedelta(days=90)
             
-            # (수정) Y축 최솟값/최댓값 강제 고정 해제 -> 아래로 스크롤할 때 잘리지 않도록 변수만 설정하고 주입 X
             mask = (df_hist.index >= zoom_start)
             if mask.any():
                 low_3m_val = hist_L[mask].min()
@@ -591,9 +600,8 @@ if st.session_state.analyzed:
                 fig_candle.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
                 fig_candle.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
-                fig_candle.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) # y축 오토스케일링 허용
+                fig_candle.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) 
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])]) 
-                # (수정) yaxis_range 속성 제거로 y축이 자동으로 맞춰지게 함
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
                 for d in first_days_month: 
@@ -619,9 +627,8 @@ if st.session_state.analyzed:
                 fig_area.add_annotation(x=low_3m_date, y=low_3m_val, text=f"📅 {low_3m_date.strftime('%y년 %m월 %d일')}<br>📉 3개월 저점: {low_3m_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=45, bgcolor="white", bordercolor="gray")
                 fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
-                fig_area.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False) # y축 오토스케일링 허용
+                fig_area.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])])
-                # (수정) yaxis_range 속성 제거
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
                 for d in first_days_month: 
@@ -655,3 +662,80 @@ if st.session_state.analyzed:
             st.plotly_chart(fig_pie, use_container_width=True)
         except Exception as e:
             st.warning("비율 데이터를 표시할 수 없습니다.")
+
+    # ==========================================
+    # 7. 국장 / 미장 실시간 5분봉 분리 차트 (최근 2일)
+    # ==========================================
+    st.write("---")
+    st.subheader("⏱️ 국장 / 미장 실시간 5분봉 시뮬레이션 (최근 2일)")
+    st.caption("※ 장이 닫힌 시간대에는 이전 종가가 계속 유지(보합)되어 계산됩니다. 각 종목의 실제 비중이 차트에 그대로 녹아있습니다.")
+    
+    col_kr_5m, col_us_5m = st.columns(2)
+
+    try:
+        df_5m_kr = st.session_state.df_5m_kr
+        df_5m_us = st.session_state.df_5m_us
+
+        # --- 7-1. 국장 5분봉 계산 ---
+        kr_O = pd.Series(0, index=df_5m_kr.index)
+        kr_H = pd.Series(0, index=df_5m_kr.index)
+        kr_L = pd.Series(0, index=df_5m_kr.index)
+        kr_C = pd.Series(0, index=df_5m_kr.index)
+
+        if SAMSUNG_QTY > 0:
+            kr_O += df_5m_kr['Open'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+            kr_H += df_5m_kr['High'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+            kr_L += df_5m_kr['Low'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+            kr_C += df_5m_kr['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+
+        for i, p in enumerate(all_stocks):
+            if p['country'] == 'KR':
+                qty = st.session_state.user_holdings[i]
+                if qty > 0:
+                    kr_O += df_5m_kr['Open'][p['ticker']].ffill().bfill() * qty
+                    kr_H += df_5m_kr['High'][p['ticker']].ffill().bfill() * qty
+                    kr_L += df_5m_kr['Low'][p['ticker']].ffill().bfill() * qty
+                    kr_C += df_5m_kr['Close'][p['ticker']].ffill().bfill() * qty
+
+        with col_kr_5m:
+            st.markdown("##### 🇰🇷 한국 시장 (원화 자산)")
+            if kr_C.sum() > 0:
+                fig_kr_5m = go.Figure(data=[go.Candlestick(x=kr_C.index, open=kr_O, high=kr_H, low=kr_L, close=kr_C, name='국장 5분봉')])
+                fig_kr_5m.update_layout(xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), height=350)
+                fig_kr_5m.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
+                fig_kr_5m.update_xaxes(tickformat="%m/%d %H:%M")
+                st.plotly_chart(fig_kr_5m, use_container_width=True)
+            else:
+                st.info("한국 시장 보유 자산이 없습니다.")
+
+        # --- 7-2. 미장 5분봉 계산 (환율 적용) ---
+        us_O = pd.Series(0, index=df_5m_us.index)
+        us_H = pd.Series(0, index=df_5m_us.index)
+        us_L = pd.Series(0, index=df_5m_us.index)
+        us_C = pd.Series(0, index=df_5m_us.index)
+
+        # 5분봉 환율을 기반으로 곱하기 (오류 방지를 위해 Close 가격만 차용하여 동일 적용)
+        krw_x = df_5m_us['Close']['KRW=X'].ffill().bfill()
+
+        for i, p in enumerate(all_stocks):
+            if p['country'] == 'US':
+                qty = st.session_state.user_holdings[i]
+                if qty > 0:
+                    us_O += df_5m_us['Open'][p['ticker']].ffill().bfill() * krw_x * qty
+                    us_H += df_5m_us['High'][p['ticker']].ffill().bfill() * krw_x * qty
+                    us_L += df_5m_us['Low'][p['ticker']].ffill().bfill() * krw_x * qty
+                    us_C += df_5m_us['Close'][p['ticker']].ffill().bfill() * krw_x * qty
+
+        with col_us_5m:
+            st.markdown("##### 🌎 미국 시장 (원화 환산 자산)")
+            if us_C.sum() > 0:
+                fig_us_5m = go.Figure(data=[go.Candlestick(x=us_C.index, open=us_O, high=us_H, low=us_L, close=us_C, name='미장 5분봉')])
+                fig_us_5m.update_layout(xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), height=350)
+                fig_us_5m.update_yaxes(tickformat=",.0f", autorange=True, fixedrange=False)
+                fig_us_5m.update_xaxes(tickformat="%m/%d %H:%M")
+                st.plotly_chart(fig_us_5m, use_container_width=True)
+            else:
+                st.info("미국 시장 보유 자산이 없습니다.")
+
+    except Exception as e:
+        st.warning("5분봉 데이터를 불러오는 중 일시적인 오류가 발생했습니다. (장 종료 직후나 네트워크 문제일 수 있습니다.)")
