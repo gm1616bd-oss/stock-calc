@@ -87,22 +87,6 @@ def get_exchange_trend():
         return df['Close']
     except: return None
 
-@st.cache_data(ttl=1800)
-def get_portfolio_news():
-    tickers = ["NVDA", "AAPL", "TSLA", "TSM", "MSFT", "GOOGL"]
-    news_list = []
-    for t in tickers:
-        try:
-            news = yf.Ticker(t).news
-            if isinstance(news, list):
-                for n in news[:2]:
-                    pub_time = n.get('providerPublishTime', n.get('publishTime', 0))
-                    if n.get('title') and n.get('link'):
-                        news_list.append({"title": f"[{t}] {n['title']}", "link": n['link'], "publisher": n.get('publisher', 'News'), "time": pub_time})
-        except: pass
-    news_list.sort(key=lambda x: x['time'], reverse=True)
-    return news_list[:10]
-
 def get_real_price_and_change(ticker, country):
     try:
         stock = yf.Ticker(ticker)
@@ -174,12 +158,6 @@ with head_col4:
         fig_spark = go.Figure(go.Scatter(x=trend_df.index, y=trend_df.values, mode='lines', line=dict(color='#2E7D32', width=3)))
         fig_spark.update_layout(margin=dict(l=0,r=0,t=0,b=0), height=40, xaxis=dict(visible=False), yaxis=dict(visible=False), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_spark, use_container_width=True, config={'displayModeBar': False})
-
-news_data = get_portfolio_news()
-with st.expander("📰 내 포트폴리오 글로벌 주요 뉴스 (최신 10건)", expanded=False):
-    if news_data:
-        for item in news_data: st.markdown(f"- [{item['title']}]({item['link']}) *(출처: {item['publisher']})*")
-    else: st.write("일시적인 API 지연으로 현재 뉴스를 불러올 수 없습니다.")
 
 st.write("---")
 
@@ -337,7 +315,7 @@ if st.session_state.analyzed:
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
         "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
         "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit,
-        "목표비중숫자": 0.0, "실제비중숫자": sam_actual_ratio_num, "목표금액숫자": 0.0, # 요약 계산용 수치
+        "목표비중숫자": 0.0, "실제비중숫자": sam_actual_ratio_num, "목표금액숫자": 0.0,
         "카테고리": "국장" 
     })
 
@@ -387,7 +365,7 @@ if st.session_state.analyzed:
             "목표금액": f"{actual_target_cost:,.0f}원", "실제금액": f"{my_amt:,.0f}원",
             "목표수량": str(int(target_qty)), "내보유": str(int(my_qty)), "실행": action,
             "등락률숫자": change_pct, "실제금액숫자": my_amt, "오늘수익숫자": today_profit,
-            "목표비중숫자": target_ratio_num, "실제비중숫자": actual_ratio_num, "목표금액숫자": actual_target_cost, # 요약 계산용 수치
+            "목표비중숫자": target_ratio_num, "실제비중숫자": actual_ratio_num, "목표금액숫자": actual_target_cost,
             "카테고리": category
         })
 
@@ -396,7 +374,7 @@ if st.session_state.analyzed:
     if st.session_state.filter_by != "전체":
         df_stocks = df_stocks[df_stocks['카테고리'] == st.session_state.filter_by]
     
-    # 💡 요약(합계) 행을 위한 계산
+    # 요약(합계) 행을 위한 계산
     sum_actual_amt = df_stocks['실제금액숫자'].sum()
     sum_today_profit = df_stocks['오늘수익숫자'].sum()
     sum_target_ratio = df_stocks['목표비중숫자'].sum()
@@ -424,7 +402,7 @@ if st.session_state.analyzed:
     # 정렬 및 불필요한 열 제거
     df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '목표비중숫자', '실제비중숫자', '목표금액숫자', '카테고리'])
     
-    # 💡 정렬이 끝난 후 맨 밑에 요약 줄 추가
+    # 정렬이 끝난 후 맨 밑에 요약 줄 추가
     df_stocks = pd.concat([df_stocks, pd.DataFrame([summary_row])], ignore_index=True)
 
     # --- 5-2. 요약표 생성 ---
@@ -472,7 +450,6 @@ if st.session_state.analyzed:
     
     df_summary = pd.DataFrame(sum_rows)
 
-    # 💡 렌더링 시 색상 및 스타일 입히기 (요약 줄 전용 스타일 함수 추가)
     def style_change_color(val):
         val_str = str(val)
         if '▲' in val_str: return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;'
@@ -492,7 +469,6 @@ if st.session_state.analyzed:
         return f'color: {color}; font-weight: bold;'
 
     def style_stock_dataframe(row):
-        # 방금 새로 생성한 '요약' 행이면 배경색 칠하기
         if '요약' in str(row['종목']):
             return ['background-color: #EEEEEE; font-weight: bold;'] * len(row)
         return [''] * len(row)
@@ -508,13 +484,14 @@ if st.session_state.analyzed:
 
     st.subheader(f"📑 개별 종목 상세 현황 (현재 필터: {st.session_state.filter_by})")
     st.dataframe(
-        df_stocks.style.apply(style_stock_dataframe, axis=1)  # 요약 줄 스타일
+        df_stocks.style.apply(style_stock_dataframe, axis=1)
                  .map(style_text_color, subset=['실행'])
                  .map(style_change_color, subset=['등락률', '오늘수익'])
                  .map(style_d1_color, subset=['D-1'])
                  .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        column_config={"종목": st.column_config.TextColumn("종목", width=160)},
+        # 종목 컬럼의 너비를 딱 맞게 축소 (110으로 설정)
+        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
         hide_index=True, use_container_width=False, height=650 
     )
 
@@ -527,7 +504,8 @@ if st.session_state.analyzed:
                   .map(style_d1_color, subset=['D-1'])
                   .set_properties(**{'text-align': 'center'}),
         column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
-        column_config={"종목": st.column_config.TextColumn("종목", width=160)},
+        # 여기도 동일하게 110으로 설정
+        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
         hide_index=True, use_container_width=False, height=250 
     )
 
@@ -618,7 +596,8 @@ if st.session_state.analyzed:
                 fig_candle.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
                 fig_candle.update_yaxes(tickformat=",.0f")
-                fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
+                # rangeslider_visible=True 추가하여 하단 레인지 뷰어 활성화
+                fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
                 for d in first_days_month: 
@@ -645,7 +624,8 @@ if st.session_state.analyzed:
                 fig_area.add_annotation(x=curr_date, y=curr_val, text=f"🔴 현재가: {curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
 
                 fig_area.update_yaxes(tickformat=",.0f")
-                fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
+                # rangeslider_visible=True 추가
+                fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=True, rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
                 for d in first_days_month: 
