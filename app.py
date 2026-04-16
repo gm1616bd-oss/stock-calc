@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
 if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
+if "total_asset" not in st.session_state: st.session_state.total_asset = 0
 
 # ==========================================
 # 🔑 구글 시트 연결 설정
@@ -156,10 +157,21 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-head_col1, head_col2, head_col3 = st.columns(3)
-with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
-with head_col2: st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
+# --- 수정된 헤더 레이아웃 (날짜 - 총자산 - 시간 - 환율) ---
+head_col1, head_col2, head_col3, head_col4 = st.columns([1, 1.3, 1, 1])
+
+with head_col1: 
+    st.info(f"**📅 오늘 날짜**\n### {date_str}")
+
+with head_col2:
+    # 날짜와 시간 사이에 총자산 배치 (분석 전에는 0원 혹은 이전 값 표시)
+    total_val = st.session_state.get("total_asset", 0)
+    st.info(f"**💰 현재 총자산**\n### {total_val:,.0f}원")
+
 with head_col3: 
+    st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
+
+with head_col4: 
     st.info(f"**💵 실시간 환율 (KRW/USD)**\n### {exc_rate:,.1f}원")
     trend_df = get_exchange_trend()
     if trend_df is not None and not trend_df.empty:
@@ -293,10 +305,11 @@ if execute_btn:
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부 (표 분리, D-1 열 추가, UI개선)
+# 5. 화면 출력부
 # ==========================================
 if st.session_state.analyzed:
-    st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
+    # 상단 헤더에 표시되므로 중복 문구 삭제 가능 (필요 시 유지)
+    # st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
     st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
     col_btn1, col_btn2, col_btn3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
@@ -532,7 +545,6 @@ if st.session_state.analyzed:
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
-            # ★ 월 구분선과 연 구분선 분리!
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
@@ -553,7 +565,6 @@ if st.session_state.analyzed:
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
                     if d in first_days_year:
                         fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
@@ -581,7 +592,6 @@ if st.session_state.analyzed:
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
                     if d in first_days_year:
                         fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
