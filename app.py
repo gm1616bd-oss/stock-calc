@@ -78,8 +78,10 @@ def get_brand(raw_name):
 @st.cache_data(ttl=600)
 def get_current_exchange_rate():
     try: 
-        hist = yf.Ticker("KRW=X").history(period="5d")
-        return float(hist['Close'].iloc[-1])
+        # 실시간 데이터(1d)를 우선 가져오고, 없으면 5d로 보완
+        hist = yf.Ticker("KRW=X").history(period="1d")
+        if not hist.empty: return float(hist['Close'].iloc[-1])
+        else: return float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
     except: return 1400.0
 
 @st.cache_data(ttl=3600)
@@ -135,11 +137,12 @@ def get_real_price_and_change(ticker, country):
     except: return 0, 0.0, 0, 0.0, 0
 
 # ==========================================
-# 3. 최상단 UI
+# 3. 최상단 UI (기록 차트 + 전광판 + 입력 패널)
 # ==========================================
 st.set_page_config(page_title="스마트 리밸런싱", page_icon="📈", layout="wide")
 st.title("📈 퀀트 포트폴리오 터미널")
 
+# 과거 총자산 기록 차트
 try:
     if "export?format=csv" in SHEET_CSV_URL:
         history_df = pd.read_csv(SHEET_CSV_URL)
@@ -160,7 +163,7 @@ st.subheader("⚙️ 통합 자산 데이터 입력 (원클릭 복붙)")
 params = st.query_params
 default_data = params.get("data", "")
 
-st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1) + 수량(15) + 평균단가(16) + 실현손익(16)")
+st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1) + 수량(15) + 평균단가_원화(16) + 실현손익_원화(16)")
 all_data_input = st.text_input("📝 데이터 입력칸", value=default_data, placeholder="예: 10000000 10 5 3 0 10 50 ... (48개 숫자 띄어쓰기 연속 입력)")
 execute_btn = st.button("분석 실행 및 시트에 기록 🚀", type="primary", use_container_width=True)
 
@@ -176,8 +179,10 @@ exc_rate = get_current_exchange_rate()
 head_col1, head_col2, head_col3, head_col4 = st.columns(4)
 with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
 with head_col2: 
-    if st.session_state.total_asset > 0: st.info(f"**💰 포트폴리오 총 자산**\n### {st.session_state.total_asset:,.0f}원")
-    else: st.info(f"**💰 포트폴리오 총 자산**\n### 분석 대기중")
+    if st.session_state.total_asset > 0:
+        st.info(f"**💰 포트폴리오 총 자산**\n### {st.session_state.total_asset:,.0f}원")
+    else:
+        st.info(f"**💰 포트폴리오 총 자산**\n### 분석 대기중")
 with head_col3: st.info(f"**⏰ 현재 시간**\n### {time_str}")
 with head_col4: 
     st.info(f"**💵 실시간 환율**\n### {exc_rate:,.1f}원")
@@ -223,8 +228,9 @@ if execute_btn:
 
     with st.spinner('실시간 시세 및 3년치 글로벌 차트 로딩 중... (약 15초 소요)'):
         try: 
-            fx_hist = yf.Ticker("KRW=X").history(period="5d")
-            exchange_rate = float(fx_hist['Close'].iloc[-1])
+            fx_hist = yf.Ticker("KRW=X").history(period="1d")
+            if not fx_hist.empty: exchange_rate = float(fx_hist['Close'].iloc[-1])
+            else: exchange_rate = float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
         except: exchange_rate = 1400.0
         
         current_stock_assets = 0
@@ -385,7 +391,7 @@ if st.session_state.analyzed:
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
     if col_btn3.button("💸 오늘수익 내림차순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
 
-    # --- 공통 스타일링 ---
+    # --- 공통 스타일링 함수 ---
     def style_change_color(val):
         val_str = str(val)
         if '▼' in val_str or '-' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
@@ -480,6 +486,7 @@ if st.session_state.analyzed:
 
     df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False)
     
+    # 버튼식 종목 필터
     filter_opt = st.radio("🔍 섹터 필터", ["전체보기", "🌎 미장 (US)", "🇰🇷 국장 (KR)", "🛡️ 현금성 (ETF)"], horizontal=True)
     if filter_opt == "🌎 미장 (US)": df_stocks = df_stocks[df_stocks['구분'] == 'US']
     elif filter_opt == "🇰🇷 국장 (KR)": df_stocks = df_stocks[df_stocks['구분'] == 'KR']
@@ -632,69 +639,47 @@ if st.session_state.analyzed:
     
     with col_chart:
         st.subheader("📉 자산 성장 시뮬레이션 (3년)")
-        # ★ 내 보유종목 기준 맞춤형 미장/국장 캔들 차트 복구
+        # ★ 차트 탭 원복
         tab1, tab2, tab3, tab4 = st.tabs(["🕯️ 총자산 캔들", "📊 층별 누적 영역", "🦅 내 미장 포트폴리오", "🐅 내 국장 포트폴리오"])
         
         try:
             df_hist = st.session_state.df_hist
             
-            # --- ★ 완벽하게 수정된 차트 데이터 생성기 ---
-            def get_custom_series(sector):
-                s_O = pd.Series(0.0, index=df_hist.index)
-                s_H = pd.Series(0.0, index=df_hist.index)
-                s_L = pd.Series(0.0, index=df_hist.index)
-                s_C = pd.Series(0.0, index=df_hist.index)
-                
+            # ★ 과거에 가장 완벽했던 "심플 합산 로직(원래 코드)" 복구 완료!
+            def get_custom_series(col, sector):
+                s = pd.Series(0.0, index=df_hist.index)
                 if sector in ['ALL', 'KR']:
-                    # 결측치, 0원 에러 방지 처리 적용
-                    tkr_O = df_hist['Open'][SAMSUNG_TICKER].ffill().bfill()
-                    tkr_C = df_hist['Close'][SAMSUNG_TICKER].ffill().bfill()
-                    tkr_H = df_hist['High'][SAMSUNG_TICKER].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, max).combine(tkr_C, max)
-                    tkr_L = df_hist['Low'][SAMSUNG_TICKER].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, min).combine(tkr_C, min)
-                    
-                    s_O += tkr_O * st.session_state.sam_qty
-                    s_H += tkr_H * st.session_state.sam_qty
-                    s_L += tkr_L * st.session_state.sam_qty
-                    s_C += tkr_C * st.session_state.sam_qty
-                
+                    s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
                 if sector == 'ALL':
-                    s_O += st.session_state.input_cash
-                    s_H += st.session_state.input_cash
-                    s_L += st.session_state.input_cash
-                    s_C += st.session_state.input_cash
-
-                # 환율 데이터도 안전하게 처리
-                fx_rate = df_hist['Close']['KRW=X'].ffill().bfill().replace(0, 1400).fillna(1400)
+                    s += st.session_state.input_cash
 
                 for i, p in enumerate(all_stocks):
                     qty = st.session_state.user_holdings[i]
                     if qty > 0:
                         tkr = p['ticker']
                         p_sec = "US" if p['country'] == 'US' else "KR"
-                        
                         if sector == 'ALL' or sector == p_sec:
-                            tkr_O = df_hist['Open'][tkr].ffill().bfill()
-                            tkr_C = df_hist['Close'][tkr].ffill().bfill()
-                            # 고가/저가가 0으로 들어오는 야후파이낸스 에러 방지 로직 (캔들 꼬리 보존)
-                            tkr_H = df_hist['High'][tkr].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, max).combine(tkr_C, max)
-                            tkr_L = df_hist['Low'][tkr].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, min).combine(tkr_C, min)
-
                             if p['country'] == 'US':
-                                s_O += tkr_O * fx_rate * qty
-                                s_H += tkr_H * fx_rate * qty
-                                s_L += tkr_L * fx_rate * qty
-                                s_C += tkr_C * fx_rate * qty
+                                s += df_hist[col][tkr].ffill().bfill() * df_hist[col]['KRW=X'].ffill().bfill() * qty
                             else:
-                                s_O += tkr_O * qty
-                                s_H += tkr_H * qty
-                                s_L += tkr_L * qty
-                                s_C += tkr_C * qty
-                return s_O, s_H, s_L, s_C
+                                s += df_hist[col][tkr].ffill().bfill() * qty
+                return s
 
-            # 시리즈 생성
-            hist_O, hist_H, hist_L, hist_C = get_custom_series('ALL')
-            us_O, us_H, us_L, us_C = get_custom_series('US')
-            kr_O, kr_H, kr_L, kr_C = get_custom_series('KR')
+            # 시리즈 생성 (꼬리가 예쁘게 나오던 오리지널 방식)
+            hist_O = get_custom_series('Open', 'ALL')
+            hist_H = get_custom_series('High', 'ALL')
+            hist_L = get_custom_series('Low', 'ALL')
+            hist_C = get_custom_series('Close', 'ALL')
+
+            us_O = get_custom_series('Open', 'US')
+            us_H = get_custom_series('High', 'US')
+            us_L = get_custom_series('Low', 'US')
+            us_C = get_custom_series('Close', 'US')
+
+            kr_O = get_custom_series('Open', 'KR')
+            kr_H = get_custom_series('High', 'KR')
+            kr_L = get_custom_series('Low', 'KR')
+            kr_C = get_custom_series('Close', 'KR')
 
             # 현재가 강제 동기화 (꼬리 보정)
             if len(hist_C) > 0:
