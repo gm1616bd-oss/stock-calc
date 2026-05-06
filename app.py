@@ -75,12 +75,8 @@ def get_brand(raw_name):
 # ==========================================
 @st.cache_data(ttl=600)
 def get_current_exchange_rate():
-    try: 
-        # ★ 월요일/휴일 오류 방지를 위해 5일 치 가져와서 마지막 값 사용
-        hist = yf.Ticker("KRW=X").history(period="5d")
-        return float(hist['Close'].iloc[-1])
-    except: 
-        return 1400.0
+    try: return yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
+    except: return 1400.0
 
 @st.cache_data(ttl=3600)
 def get_exchange_trend():
@@ -195,12 +191,8 @@ if execute_btn:
         st.stop()
 
     with st.spinner('실시간 시세 및 3년치 글로벌 차트 로딩 중... (약 15초 소요)'):
-        try: 
-            # ★ 여기도 5일 치 가져와서 마지막 값 사용
-            fx_hist = yf.Ticker("KRW=X").history(period="5d")
-            exchange_rate = float(fx_hist['Close'].iloc[-1])
-        except: 
-            exchange_rate = 1400.0
+        try: exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
+        except: exchange_rate = 1400 
         
         current_stock_assets = 0
         total_today_profit = 0
@@ -226,10 +218,10 @@ if execute_btn:
         for i, p in enumerate(all_stocks):
             price, change_pct, prev_close, prev_change_pct, d2_close = get_real_price_and_change(p['ticker'], p['country'])
             if p['country'] == "US":
-                price_krw = price * exchange_rate # 업데이트된 환율 적용
+                price_krw = price * exc_rate
                 price_usd = price
-                prev_amt_krw = prev_close * exchange_rate * user_holdings[i]
-                prev2_amt_krw = d2_close * exchange_rate * user_holdings[i]
+                prev_amt_krw = prev_close * exc_rate * user_holdings[i]
+                prev2_amt_krw = d2_close * exc_rate * user_holdings[i]
             else:
                 price_krw = price
                 price_usd = 0
@@ -301,7 +293,7 @@ if execute_btn:
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부
+# 5. 화면 출력부 (표 분리, D-1 열 추가, UI개선)
 # ==========================================
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
@@ -540,6 +532,7 @@ if st.session_state.analyzed:
             curr_val = hist_C.iloc[-1]
             curr_date = hist_C.index[-1]
 
+            # ★ 월 구분선과 연 구분선 분리!
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
@@ -560,9 +553,12 @@ if st.session_state.analyzed:
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
+                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
-                    if d in first_days_year: fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    if d in first_days_year:
+                        fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else:
+                        fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_candle, use_container_width=True)
 
             with tab2:
@@ -585,9 +581,12 @@ if st.session_state.analyzed:
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
+                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
-                    if d in first_days_year: fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    if d in first_days_year:
+                        fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else:
+                        fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
 
         except Exception as e:
