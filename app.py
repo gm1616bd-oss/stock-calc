@@ -20,7 +20,7 @@ WEB_APP_URL = "여기에_웹앱_URL을_넣어주세요"
 # 1. 포트폴리오 정의 & 브랜드 메타데이터
 # ==========================================
 SAMSUNG_TICKER = "005930.KS"
-SAMSUNG_QTY = 41
+SAMSUNG_QTY = 41 # ★ 삼성전자 수량 시스템 고정
 
 fixed_portfolio = [
     {"name": "GLDM", "ticker": "GLDM", "ratio": 0.04, "country": "US"},
@@ -139,19 +139,14 @@ def get_real_price_and_change(ticker, country):
 st.set_page_config(page_title="스마트 리밸런싱", page_icon="📈", layout="wide")
 st.title("📈 퀀트 포트폴리오 터미널")
 
-st.subheader("⚙️ 자산 및 수량 세팅")
+# ★ 원클릭 복붙 입력 패널
+st.subheader("⚙️ 통합 자산 데이터 입력 (원클릭 복붙)")
 params = st.query_params
-default_cash = int(params.get("cash", "10000000"))
-default_holdings = params.get("holdings", "")
-default_avg_prices = params.get("avg_prices", "")
-default_realized = params.get("realized", "")
+default_data = params.get("data", "")
 
-input_cash = st.number_input("💵 현재 계좌에 있는 현금(예수금) 총액 (원화)", min_value=0, value=default_cash, step=100000, format="%d")
-st.caption(f"**입력 순서 (총 16개):** {' → '.join(all_names)}")
-holdings_input = st.text_input("🔢 보유 수량 입력 (띄어쓰기 구분)", value=default_holdings, placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 200 50 41")
-avg_prices_input = st.text_input("📊 평균단가 입력 (미장 $, 국장 ₩ 기준, 띄어쓰기 구분)", value=default_avg_prices, placeholder="예: 200.5 150.2 ...")
-realized_profits_input = st.text_input("💸 실현손익 입력 (전부 원화(₩) 기준, 띄어쓰기 구분)", value=default_realized, placeholder="예: 50000 120000 -30000 ...")
-
+st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1개) + 수량(15개, 삼전 제외) + 평균단가_원화(16개) + 실현손익_원화(16개) 순서로 띄어쓰기하여 한 줄로 붙여넣으세요.")
+st.caption(f"**종목 순서:** {' → '.join(all_names)}")
+all_data_input = st.text_input("📝 데이터 입력칸", value=default_data, placeholder="예: 10000000 10 5 3 0 10 50 ... (48개 숫자 띄어쓰기 연속 입력)")
 execute_btn = st.button("분석 실행 및 시트에 기록 🚀", type="primary", use_container_width=True)
 
 st.write("---")
@@ -186,19 +181,24 @@ st.write("---")
 # 4. 데이터 수집 엔진
 # ==========================================
 if execute_btn:
-    st.query_params["cash"] = str(input_cash)
-    st.query_params["holdings"] = holdings_input
-    st.query_params["avg_prices"] = avg_prices_input
-    st.query_params["realized"] = realized_profits_input
+    st.query_params["data"] = all_data_input
     
     try:
-        user_holdings = [int(x) for x in holdings_input.split()] if holdings_input.strip() else [0]*15
-        avg_prices = [float(x) for x in avg_prices_input.split()] if avg_prices_input.strip() else [0]*16
-        realized_profits = [float(x) for x in realized_profits_input.split()] if realized_profits_input.strip() else [0]*16
-        
-        while len(user_holdings) < 15: user_holdings.append(0)
-        while len(avg_prices) < 16: avg_prices.append(0.0)
-        while len(realized_profits) < 16: realized_profits.append(0.0)
+        raw_vals = [float(x) for x in all_data_input.split()]
+        if len(raw_vals) == 0:
+            input_cash = 10000000
+            user_holdings = [0]*15 # 삼성전자 제외 15개
+            avg_prices = [0]*16
+            realized_profits = [0]*16
+        else:
+            input_cash = raw_vals[0]
+            user_holdings = [int(x) for x in raw_vals[1:16]] # 15개
+            avg_prices = raw_vals[16:32] # 16개
+            realized_profits = raw_vals[32:48] # 16개
+            
+            while len(user_holdings) < 15: user_holdings.append(0)
+            while len(avg_prices) < 16: avg_prices.append(0.0)
+            while len(realized_profits) < 16: realized_profits.append(0.0)
     except ValueError:
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
@@ -220,7 +220,6 @@ if execute_btn:
         cat_prev = {"US": 0, "KR": 0, "ETF": 0}
         cat_prev2 = {"US": 0, "KR": 0, "ETF": 0}
 
-        # 종목별 상세 수익현황 데이터를 담을 리스트
         profit_details = []
         cat_profit = {
             "US": {"unreal":0, "real":0, "total":0, "prin":0},
@@ -236,17 +235,18 @@ if execute_btn:
                 cat_profit[c]["total"] += (unreal + real)
                 cat_profit[c]["prin"] += prin
 
-        # 삼성전자 (Index 15) 계산
+        # 삼성전자 (Index 15) 계산 - 수량은 시스템(SAMSUNG_QTY) 고정
+        sam_qty = SAMSUNG_QTY
         sam_price, sam_change, sam_prev, sam_prev_change, sam_d2 = get_real_price_and_change(SAMSUNG_TICKER, "KR")
-        sam_amt = sam_price * SAMSUNG_QTY
-        sam_profit = sam_amt - (sam_prev * SAMSUNG_QTY)
+        sam_amt = sam_price * sam_qty
+        sam_profit = sam_amt - (sam_prev * sam_qty)
         current_stock_assets += sam_amt
         total_today_profit += sam_profit
-        total_prev_asset += (sam_prev * SAMSUNG_QTY)
-        total_prev2_asset += (sam_d2 * SAMSUNG_QTY)
+        total_prev_asset += (sam_prev * sam_qty)
+        total_prev2_asset += (sam_d2 * sam_qty)
         cat_cur["KR"] += sam_amt
-        cat_prev["KR"] += (sam_prev * SAMSUNG_QTY)
-        cat_prev2["KR"] += (sam_d2 * SAMSUNG_QTY)
+        cat_prev["KR"] += (sam_prev * sam_qty)
+        cat_prev2["KR"] += (sam_d2 * sam_qty)
 
         # 1~15번 종목 계산
         for i, p in enumerate(all_stocks):
@@ -284,37 +284,34 @@ if execute_btn:
                 "change_pct": change_pct, "today_profit": today_profit, "prev_change_pct": prev_change_pct
             })
 
-            # --- 수익 현황 계산 ---
+            # --- 원화 기준 수익 계산 ---
             avg_p = avg_prices[i]
             real_p = realized_profits[i]
-            exc = exchange_rate if p['country'] == 'US' else 1
-            inv_krw = avg_p * my_qty * exc
+            inv_krw = avg_p * my_qty 
             
             unreal = my_amt - inv_krw if my_qty > 0 else 0
             total = unreal + real_p
-            prin = my_amt - total # 조정원금
+            prin = my_amt - total 
             
-            real_avg = avg_p - (real_p / exc / my_qty) if my_qty > 0 else 0
+            real_avg = avg_p - (real_p / my_qty) if my_qty > 0 else 0
             rtn = (total / prin * 100) if prin > 0 else 0
             
             add_profit_cat(sector, unreal, real_p, prin)
             
             profit_details.append({
                 "종목": get_brand(p['name'])["name"],
-                "평균단가": f"${avg_p:,.2f}" if p['country'] == 'US' else f"{avg_p:,.0f}원",
-                "실제평균단가": f"${real_avg:,.2f}" if p['country'] == 'US' else f"{real_avg:,.0f}원",
-                "현재가": f"${price_usd:,.2f}" if p['country'] == 'US' else f"{price_krw:,.0f}원",
+                "평균단가": f"{avg_p:,.0f}원", "실제평균단가": f"{real_avg:,.0f}원", "현재가": f"{price_krw:,.0f}원",
                 "미실현수익": unreal, "실현수익": real_p, "총수익": total, "원금(조정)": prin, "수익률": rtn
             })
 
         # --- 삼성전자 수익 현황 계산 ---
         sam_avg_p = avg_prices[15]
         sam_real_p = realized_profits[15]
-        sam_inv_krw = sam_avg_p * SAMSUNG_QTY
-        sam_unreal = sam_amt - sam_inv_krw if SAMSUNG_QTY > 0 else 0
+        sam_inv_krw = sam_avg_p * sam_qty
+        sam_unreal = sam_amt - sam_inv_krw if sam_qty > 0 else 0
         sam_total = sam_unreal + sam_real_p
         sam_prin = sam_amt - sam_total
-        sam_real_avg = sam_avg_p - (sam_real_p / SAMSUNG_QTY) if SAMSUNG_QTY > 0 else 0
+        sam_real_avg = sam_avg_p - (sam_real_p / sam_qty) if sam_qty > 0 else 0
         sam_rtn = (sam_total / sam_prin * 100) if sam_prin > 0 else 0
 
         add_profit_cat("KR", sam_unreal, sam_real_p, sam_prin)
@@ -344,6 +341,7 @@ if execute_btn:
         st.session_state.total_today_profit = total_today_profit
         st.session_state.total_daily_return_pct = total_daily_return_pct
         st.session_state.total_d1_change_pct = total_d1_change_pct
+        st.session_state.sam_qty = sam_qty
         st.session_state.sam_amt = sam_amt
         st.session_state.sam_price = sam_price
         st.session_state.sam_change = sam_change
@@ -426,7 +424,7 @@ if st.session_state.analyzed:
         "D-1": sam_prev_change_str, "등락률": sam_change_str, "오늘수익": sam_profit_str,
         "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
-        "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
+        "목표수량": "-", "내보유": str(int(st.session_state.sam_qty)), "실행": "🔒 매매불가",
         "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit
     })
 
@@ -584,7 +582,7 @@ if st.session_state.analyzed:
             
             def get_series(col):
                 s = pd.Series(st.session_state.input_cash, index=df_hist.index) 
-                s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+                s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
                 for i, p in enumerate(all_stocks):
                     qty = st.session_state.user_holdings[i]
                     if qty > 0:
@@ -608,7 +606,7 @@ if st.session_state.analyzed:
             s_etf = pd.Series(0, index=df_hist.index)
             s_us = pd.Series(0, index=df_hist.index)
             s_kr = pd.Series(0, index=df_hist.index)
-            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
             
             for i, p in enumerate(all_stocks):
                 qty = st.session_state.user_holdings[i]
