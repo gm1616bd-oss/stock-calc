@@ -135,12 +135,11 @@ def get_real_price_and_change(ticker, country):
     except: return 0, 0.0, 0, 0.0, 0
 
 # ==========================================
-# 3. 최상단 UI (기록 차트 + 전광판 + 입력 패널)
+# 3. 최상단 UI
 # ==========================================
 st.set_page_config(page_title="스마트 리밸런싱", page_icon="📈", layout="wide")
 st.title("📈 퀀트 포트폴리오 터미널")
 
-# 과거 총자산 기록 차트
 try:
     if "export?format=csv" in SHEET_CSV_URL:
         history_df = pd.read_csv(SHEET_CSV_URL)
@@ -161,7 +160,7 @@ st.subheader("⚙️ 통합 자산 데이터 입력 (원클릭 복붙)")
 params = st.query_params
 default_data = params.get("data", "")
 
-st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1) + 수량(15) + 평균단가_원화(16) + 실현손익_원화(16)")
+st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1) + 수량(15) + 평균단가(16) + 실현손익(16)")
 all_data_input = st.text_input("📝 데이터 입력칸", value=default_data, placeholder="예: 10000000 10 5 3 0 10 50 ... (48개 숫자 띄어쓰기 연속 입력)")
 execute_btn = st.button("분석 실행 및 시트에 기록 🚀", type="primary", use_container_width=True)
 
@@ -174,14 +173,11 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-# ★ 전광판: 날짜 -> 총자산 -> 시간 -> 환율 순서 배치
 head_col1, head_col2, head_col3, head_col4 = st.columns(4)
 with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
 with head_col2: 
-    if st.session_state.total_asset > 0:
-        st.info(f"**💰 포트폴리오 총 자산**\n### {st.session_state.total_asset:,.0f}원")
-    else:
-        st.info(f"**💰 포트폴리오 총 자산**\n### 분석 대기중")
+    if st.session_state.total_asset > 0: st.info(f"**💰 포트폴리오 총 자산**\n### {st.session_state.total_asset:,.0f}원")
+    else: st.info(f"**💰 포트폴리오 총 자산**\n### 분석 대기중")
 with head_col3: st.info(f"**⏰ 현재 시간**\n### {time_str}")
 with head_col4: 
     st.info(f"**💵 실시간 환율**\n### {exc_rate:,.1f}원")
@@ -301,7 +297,7 @@ if execute_btn:
             stock_data_cache.append({
                 "price_krw": price_krw, "price_usd": price_usd, "my_amt": my_amt, 
                 "change_pct": change_pct, "today_profit": today_profit, "prev_change_pct": prev_change_pct,
-                "sector": sector # 필터링을 위한 섹터 정보 임시 저장
+                "sector": sector 
             })
 
             avg_p = avg_prices[i]
@@ -380,7 +376,7 @@ if execute_btn:
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부 (표 분리, 필터 버튼 추가)
+# 5. 화면 출력부
 # ==========================================
 if st.session_state.analyzed:
     st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
@@ -389,7 +385,7 @@ if st.session_state.analyzed:
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
     if col_btn3.button("💸 오늘수익 내림차순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
 
-    # --- 공통 스타일링 함수 ---
+    # --- 공통 스타일링 ---
     def style_change_color(val):
         val_str = str(val)
         if '▼' in val_str or '-' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
@@ -434,7 +430,7 @@ if st.session_state.analyzed:
     sam_profit_str = format_profit(st.session_state.sam_profit)
     
     stock_rows.append({
-        "구분": "KR", # 필터링용
+        "구분": "KR", 
         "종목": get_brand("삼성전자")["name"], "현재가($)": "-", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", 
         "D-1": sam_prev_change_str, "등락률": sam_change_str, "오늘수익": sam_profit_str,
         "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
@@ -484,7 +480,6 @@ if st.session_state.analyzed:
 
     df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False)
     
-    # ★ 버튼식 종목 필터링 복구
     filter_opt = st.radio("🔍 섹터 필터", ["전체보기", "🌎 미장 (US)", "🇰🇷 국장 (KR)", "🛡️ 현금성 (ETF)"], horizontal=True)
     if filter_opt == "🌎 미장 (US)": df_stocks = df_stocks[df_stocks['구분'] == 'US']
     elif filter_opt == "🇰🇷 국장 (KR)": df_stocks = df_stocks[df_stocks['구분'] == 'KR']
@@ -492,7 +487,6 @@ if st.session_state.analyzed:
     
     df_stocks = df_stocks.drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '구분'])
 
-    # ★ 누락됐던 총합 줄 상세 표에 복구
     tot_pct = st.session_state.total_daily_return_pct
     tot_d1_pct = st.session_state.total_d1_change_pct
     tot_prof = st.session_state.total_today_profit
@@ -574,7 +568,7 @@ if st.session_state.analyzed:
             hide_index=True, use_container_width=True
         )
 
-    # --- 5-3. 섹터별 수익 요약표 (실현/미실현) ---
+    # --- 5-3. 섹터별 수익 요약표 ---
     with col_t2:
         st.subheader("📋 섹터별 수익 요약 (실현 반영)")
         cat_p = st.session_state.cat_profit
@@ -599,7 +593,6 @@ if st.session_state.analyzed:
     st.subheader("📑 종목별 상세 수익 현황 (실현손익 반영)")
     df_profits = pd.DataFrame(st.session_state.profit_details)
     
-    # ★ 누락됐던 종목별 수익현황 총합 줄 복구
     tot_unreal = st.session_state.cat_profit["ALL"]["unreal"]
     tot_real = st.session_state.cat_profit["ALL"]["real"]
     tot_total = st.session_state.cat_profit["ALL"]["total"]
@@ -645,7 +638,7 @@ if st.session_state.analyzed:
         try:
             df_hist = st.session_state.df_hist
             
-            # --- 차트 데이터 생성기 (섹터별 분리) ---
+            # --- ★ 완벽하게 수정된 차트 데이터 생성기 ---
             def get_custom_series(sector):
                 s_O = pd.Series(0.0, index=df_hist.index)
                 s_H = pd.Series(0.0, index=df_hist.index)
@@ -653,16 +646,25 @@ if st.session_state.analyzed:
                 s_C = pd.Series(0.0, index=df_hist.index)
                 
                 if sector in ['ALL', 'KR']:
-                    s_O += df_hist['Open'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
-                    s_H += df_hist['High'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
-                    s_L += df_hist['Low'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
-                    s_C += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
+                    # 결측치, 0원 에러 방지 처리 적용
+                    tkr_O = df_hist['Open'][SAMSUNG_TICKER].ffill().bfill()
+                    tkr_C = df_hist['Close'][SAMSUNG_TICKER].ffill().bfill()
+                    tkr_H = df_hist['High'][SAMSUNG_TICKER].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, max).combine(tkr_C, max)
+                    tkr_L = df_hist['Low'][SAMSUNG_TICKER].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, min).combine(tkr_C, min)
+                    
+                    s_O += tkr_O * st.session_state.sam_qty
+                    s_H += tkr_H * st.session_state.sam_qty
+                    s_L += tkr_L * st.session_state.sam_qty
+                    s_C += tkr_C * st.session_state.sam_qty
                 
                 if sector == 'ALL':
                     s_O += st.session_state.input_cash
                     s_H += st.session_state.input_cash
                     s_L += st.session_state.input_cash
                     s_C += st.session_state.input_cash
+
+                # 환율 데이터도 안전하게 처리
+                fx_rate = df_hist['Close']['KRW=X'].ffill().bfill().replace(0, 1400).fillna(1400)
 
                 for i, p in enumerate(all_stocks):
                     qty = st.session_state.user_holdings[i]
@@ -671,23 +673,27 @@ if st.session_state.analyzed:
                         p_sec = "US" if p['country'] == 'US' else "KR"
                         
                         if sector == 'ALL' or sector == p_sec:
+                            tkr_O = df_hist['Open'][tkr].ffill().bfill()
+                            tkr_C = df_hist['Close'][tkr].ffill().bfill()
+                            # 고가/저가가 0으로 들어오는 야후파이낸스 에러 방지 로직 (캔들 꼬리 보존)
+                            tkr_H = df_hist['High'][tkr].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, max).combine(tkr_C, max)
+                            tkr_L = df_hist['Low'][tkr].ffill().bfill().replace(0, pd.NA).fillna(tkr_C).combine(tkr_O, min).combine(tkr_C, min)
+
                             if p['country'] == 'US':
-                                s_O += df_hist['Open'][tkr].ffill().bfill() * df_hist['Open']['KRW=X'].ffill().bfill() * qty
-                                s_H += df_hist['High'][tkr].ffill().bfill() * df_hist['High']['KRW=X'].ffill().bfill() * qty
-                                s_L += df_hist['Low'][tkr].ffill().bfill() * df_hist['Low']['KRW=X'].ffill().bfill() * qty
-                                s_C += df_hist['Close'][tkr].ffill().bfill() * df_hist['Close']['KRW=X'].ffill().bfill() * qty
+                                s_O += tkr_O * fx_rate * qty
+                                s_H += tkr_H * fx_rate * qty
+                                s_L += tkr_L * fx_rate * qty
+                                s_C += tkr_C * fx_rate * qty
                             else:
-                                s_O += df_hist['Open'][tkr].ffill().bfill() * qty
-                                s_H += df_hist['High'][tkr].ffill().bfill() * qty
-                                s_L += df_hist['Low'][tkr].ffill().bfill() * qty
-                                s_C += df_hist['Close'][tkr].ffill().bfill() * qty
+                                s_O += tkr_O * qty
+                                s_H += tkr_H * qty
+                                s_L += tkr_L * qty
+                                s_C += tkr_C * qty
                 return s_O, s_H, s_L, s_C
 
-            # 총자산 시리즈
+            # 시리즈 생성
             hist_O, hist_H, hist_L, hist_C = get_custom_series('ALL')
-            # 미장 전용 시리즈
             us_O, us_H, us_L, us_C = get_custom_series('US')
-            # 국장 전용 시리즈
             kr_O, kr_H, kr_L, kr_C = get_custom_series('KR')
 
             # 현재가 강제 동기화 (꼬리 보정)
@@ -698,10 +704,8 @@ if st.session_state.analyzed:
                 
                 if hist_H.iloc[-1] < hist_C.iloc[-1]: hist_H.iloc[-1] = hist_C.iloc[-1]
                 if hist_L.iloc[-1] > hist_C.iloc[-1]: hist_L.iloc[-1] = hist_C.iloc[-1]
-                
                 if us_H.iloc[-1] < us_C.iloc[-1]: us_H.iloc[-1] = us_C.iloc[-1]
                 if us_L.iloc[-1] > us_C.iloc[-1]: us_L.iloc[-1] = us_C.iloc[-1]
-                
                 if kr_H.iloc[-1] < kr_C.iloc[-1]: kr_H.iloc[-1] = kr_C.iloc[-1]
                 if kr_L.iloc[-1] > kr_C.iloc[-1]: kr_L.iloc[-1] = kr_C.iloc[-1]
 
@@ -739,7 +743,6 @@ if st.session_state.analyzed:
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
-            # 탭 1: 총자산 캔들
             with tab1:
                 ath_val, ath_date, low_3m_val, low_3m_date, curr_val, curr_date, zoom_start, last_date, min_y, max_y = get_chart_bounds(hist_H, hist_L, hist_C)
                 fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index, open=hist_O.values, high=hist_H.values, low=hist_L.values, close=hist_C.values, name='총자산')])
@@ -761,7 +764,6 @@ if st.session_state.analyzed:
                     else: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_candle, use_container_width=True)
 
-            # 탭 2: 층별 누적 영역
             with tab2:
                 fig_area = go.Figure()
                 fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
@@ -787,7 +789,6 @@ if st.session_state.analyzed:
                     else: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
 
-            # ★ 탭 3: 내 미장 포트폴리오 전용 캔들차트
             with tab3:
                 u_ath_val, u_ath_date, u_low_3m_val, u_low_3m_date, u_curr_val, u_curr_date, u_z_start, u_l_date, u_min_y, u_max_y = get_chart_bounds(us_H, us_L, us_C)
                 if us_H.max() > 0:
@@ -807,7 +808,6 @@ if st.session_state.analyzed:
                 else:
                     st.info("현재 미장(US) 종목을 보유하고 있지 않습니다.")
 
-            # ★ 탭 4: 내 국장 포트폴리오 전용 캔들차트
             with tab4:
                 k_ath_val, k_ath_date, k_low_3m_val, k_low_3m_date, k_curr_val, k_curr_date, k_z_start, k_l_date, k_min_y, k_max_y = get_chart_bounds(kr_H, kr_L, kr_C)
                 if kr_H.max() > 0:
