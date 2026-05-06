@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 # --- 앱 메모리(Session State) 초기화 ---
 if "analyzed" not in st.session_state: st.session_state.analyzed = False
 if "sort_by" not in st.session_state: st.session_state.sort_by = "등락률숫자" 
+if "total_asset" not in st.session_state: st.session_state.total_asset = 0
 
 # ==========================================
 # 🔑 구글 시트 연결 설정
@@ -44,7 +45,7 @@ invest_portfolio = [
 ]
 
 all_stocks = fixed_portfolio + invest_portfolio
-all_names = [item['name'] for item in all_stocks] 
+all_names = [item['name'] for item in all_stocks] + ["삼성전자"]
 
 brand_meta = {
     "TSM": {"name": "📱 TSM", "color": "#8A5A5A"},
@@ -63,7 +64,8 @@ brand_meta = {
     "TLT": {"name": "📜 TLT", "color": "#0076CE"},
     "IEI": {"name": "📄 IEI", "color": "#0093D0"},
     "SCHD": {"name": "💸 SCHD", "color": "#005A9C"},
-    "예수금": {"name": "💵 예수금", "color": "#85BB65"}
+    "예수금": {"name": "💵 예수금", "color": "#85BB65"},
+    "포트폴리오 총합": {"name": "📊 포트폴리오 총합", "color": "#EEEEEE"}
 }
 
 def get_brand(raw_name):
@@ -75,7 +77,10 @@ def get_brand(raw_name):
 # ==========================================
 @st.cache_data(ttl=600)
 def get_current_exchange_rate():
-    try: return yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
+    try: 
+        hist = yf.Ticker("KRW=X").history(period="1d")
+        if not hist.empty: return float(hist['Close'].iloc[-1])
+        else: return float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
     except: return 1400.0
 
 @st.cache_data(ttl=3600)
@@ -131,20 +136,34 @@ def get_real_price_and_change(ticker, country):
     except: return 0, 0.0, 0, 0.0, 0
 
 # ==========================================
-# 3. 최상단 UI (입력 패널 ➔ 전광판 헤더)
+# 3. 최상단 UI (기록 차트 + 전광판 + 입력 패널)
 # ==========================================
 st.set_page_config(page_title="스마트 리밸런싱", page_icon="📈", layout="wide")
 st.title("📈 퀀트 포트폴리오 터미널")
 
-st.subheader("⚙️ 자산 및 수량 세팅")
-params = st.query_params
-try: default_cash = int(params.get("cash", "10000000"))
-except: default_cash = 10000000
-default_holdings = params.get("holdings", "")
+# 과거 총자산 기록 차트
+try:
+    if "export?format=csv" in SHEET_CSV_URL:
+        history_df = pd.read_csv(SHEET_CSV_URL)
+        if not history_df.empty:
+            history_df.columns = ['날짜', '총자산']
+            history_df = history_df.drop_duplicates(subset=['날짜'], keep='last')
+            history_df['날짜'] = pd.to_datetime(history_df['날짜'])
+            history_df = history_df.set_index('날짜')
+            st.area_chart(history_df['총자산'])
+            if len(history_df) >= 2:
+                diff = history_df['총자산'].iloc[-1] - history_df['총자산'].iloc[-2]
+                st.metric(label="구글 시트에 기록된 최근 총 자산", value=f"{int(history_df['총자산'].iloc[-1]):,.0f}원", delta=f"{int(diff):,.0f}원")
+            st.write("---")
+except Exception as e:
+    pass
 
-input_cash = st.number_input("💵 현재 계좌에 있는 현금(예수금) 총액 (원화)", min_value=0, value=default_cash, step=100000, format="%d")
-st.caption(f"**입력 순서 (총 15개, 삼성전자 제외):** {' → '.join(all_names)}")
-holdings_input = st.text_input("🔢 종목별 수량 (띄어쓰기로 구분)", value=default_holdings, placeholder="예: 10 5 3 0 10 50 15 20 5 10 5 8 10 200 50")
+st.subheader("⚙️ 통합 자산 데이터 입력 (원클릭 복붙)")
+params = st.query_params
+default_data = params.get("data", "")
+
+st.caption(f"🚨 **입력 규칙 (총 48개 숫자):** 현금(1) + 수량(15) + 평균단가_원화(16) + 실현손익_원화(16)")
+all_data_input = st.text_input("📝 데이터 입력칸", value=default_data, placeholder="예: 10000000 10 5 3 0 10 50 ... (48개 숫자 띄어쓰기 연속 입력)")
 execute_btn = st.button("분석 실행 및 시트에 기록 🚀", type="primary", use_container_width=True)
 
 st.write("---")
@@ -156,11 +175,16 @@ date_str = f"{now.strftime('%Y년 %m월 %d일')} ({weekdays[now.weekday()]})"
 time_str = now.strftime("%p %I:%M").replace("AM", "오전").replace("PM", "오후")
 exc_rate = get_current_exchange_rate()
 
-head_col1, head_col2, head_col3 = st.columns(3)
+head_col1, head_col2, head_col3, head_col4 = st.columns(4)
 with head_col1: st.info(f"**📅 오늘 날짜**\n### {date_str}")
-with head_col2: st.info(f"**⏰ 현재 시간 (KST)**\n### {time_str}")
-with head_col3: 
-    st.info(f"**💵 실시간 환율 (KRW/USD)**\n### {exc_rate:,.1f}원")
+with head_col2: 
+    if st.session_state.total_asset > 0:
+        st.info(f"**💰 포트폴리오 총 자산**\n### {st.session_state.total_asset:,.0f}원")
+    else:
+        st.info(f"**💰 포트폴리오 총 자산**\n### 분석 대기중")
+with head_col3: st.info(f"**⏰ 현재 시간**\n### {time_str}")
+with head_col4: 
+    st.info(f"**💵 실시간 환율**\n### {exc_rate:,.1f}원")
     trend_df = get_exchange_trend()
     if trend_df is not None and not trend_df.empty:
         fig_spark = go.Figure(go.Scatter(x=trend_df.index, y=trend_df.values, mode='lines', line=dict(color='#2E7D32', width=3)))
@@ -179,20 +203,34 @@ st.write("---")
 # 4. 데이터 수집 엔진
 # ==========================================
 if execute_btn:
-    st.query_params["cash"] = str(input_cash)
-    st.query_params["holdings"] = holdings_input
+    st.query_params["data"] = all_data_input
     
     try:
-        if holdings_input.strip() == "": user_holdings = [0] * len(all_stocks)
-        else: user_holdings = list(map(int, holdings_input.split()))
-        if len(user_holdings) < len(all_stocks): user_holdings += [0] * (len(all_stocks) - len(user_holdings))
+        raw_vals = [float(x) for x in all_data_input.split()]
+        if len(raw_vals) == 0:
+            input_cash = 10000000
+            user_holdings = [0]*15 
+            avg_prices = [0]*16
+            realized_profits = [0]*16
+        else:
+            input_cash = raw_vals[0]
+            user_holdings = [int(x) for x in raw_vals[1:16]]
+            avg_prices = raw_vals[16:32]
+            realized_profits = raw_vals[32:48]
+            
+            while len(user_holdings) < 15: user_holdings.append(0)
+            while len(avg_prices) < 16: avg_prices.append(0.0)
+            while len(realized_profits) < 16: realized_profits.append(0.0)
     except ValueError:
         st.error("숫자와 띄어쓰기만 입력해주세요!")
         st.stop()
 
     with st.spinner('실시간 시세 및 3년치 글로벌 차트 로딩 중... (약 15초 소요)'):
-        try: exchange_rate = yf.Ticker("KRW=X").history(period="1d")['Close'].iloc[-1]
-        except: exchange_rate = 1400 
+        try: 
+            fx_hist_real = yf.Ticker("KRW=X").history(period="1d")
+            if not fx_hist_real.empty: exchange_rate = float(fx_hist_real['Close'].iloc[-1])
+            else: exchange_rate = float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
+        except: exchange_rate = 1400.0
         
         current_stock_assets = 0
         total_today_profit = 0
@@ -204,24 +242,40 @@ if execute_btn:
         cat_prev = {"US": 0, "KR": 0, "ETF": 0}
         cat_prev2 = {"US": 0, "KR": 0, "ETF": 0}
 
+        profit_details = []
+        cat_profit = {
+            "US": {"unreal":0, "real":0, "total":0, "prin":0},
+            "KR": {"unreal":0, "real":0, "total":0, "prin":0},
+            "ETF": {"unreal":0, "real":0, "total":0, "prin":0},
+            "ALL": {"unreal":0, "real":0, "total":0, "prin":0}
+        }
+
+        def add_profit_cat(category, unreal, real, prin):
+            for c in [category, "ALL"]:
+                cat_profit[c]["unreal"] += unreal
+                cat_profit[c]["real"] += real
+                cat_profit[c]["total"] += (unreal + real)
+                cat_profit[c]["prin"] += prin
+
+        sam_qty = SAMSUNG_QTY
         sam_price, sam_change, sam_prev, sam_prev_change, sam_d2 = get_real_price_and_change(SAMSUNG_TICKER, "KR")
-        sam_amt = sam_price * SAMSUNG_QTY
-        sam_profit = sam_amt - (sam_prev * SAMSUNG_QTY)
+        sam_amt = sam_price * sam_qty
+        sam_profit = sam_amt - (sam_prev * sam_qty)
         current_stock_assets += sam_amt
         total_today_profit += sam_profit
-        total_prev_asset += (sam_prev * SAMSUNG_QTY)
-        total_prev2_asset += (sam_d2 * SAMSUNG_QTY)
+        total_prev_asset += (sam_prev * sam_qty)
+        total_prev2_asset += (sam_d2 * sam_qty)
         cat_cur["KR"] += sam_amt
-        cat_prev["KR"] += (sam_prev * SAMSUNG_QTY)
-        cat_prev2["KR"] += (sam_d2 * SAMSUNG_QTY)
+        cat_prev["KR"] += (sam_prev * sam_qty)
+        cat_prev2["KR"] += (sam_d2 * sam_qty)
 
         for i, p in enumerate(all_stocks):
             price, change_pct, prev_close, prev_change_pct, d2_close = get_real_price_and_change(p['ticker'], p['country'])
             if p['country'] == "US":
-                price_krw = price * exc_rate
+                price_krw = price * exchange_rate 
                 price_usd = price
-                prev_amt_krw = prev_close * exc_rate * user_holdings[i]
-                prev2_amt_krw = d2_close * exc_rate * user_holdings[i]
+                prev_amt_krw = prev_close * exchange_rate * user_holdings[i]
+                prev2_amt_krw = d2_close * exchange_rate * user_holdings[i]
             else:
                 price_krw = price
                 price_usd = 0
@@ -237,23 +291,54 @@ if execute_btn:
             total_prev_asset += prev_amt_krw
             total_prev2_asset += prev2_amt_krw
             
-            if i < 5:
-                cat_cur["ETF"] += my_amt
-                cat_prev["ETF"] += prev_amt_krw
-                cat_prev2["ETF"] += prev2_amt_krw
-            elif p['country'] == 'US':
-                cat_cur["US"] += my_amt
-                cat_prev["US"] += prev_amt_krw
-                cat_prev2["US"] += prev2_amt_krw
+            sector = "ETF" if i < 5 else ("US" if p['country'] == 'US' else "KR")
+            if sector == "ETF":
+                cat_cur["ETF"] += my_amt; cat_prev["ETF"] += prev_amt_krw; cat_prev2["ETF"] += prev2_amt_krw
+            elif sector == "US":
+                cat_cur["US"] += my_amt; cat_prev["US"] += prev_amt_krw; cat_prev2["US"] += prev2_amt_krw
             else:
-                cat_cur["KR"] += my_amt
-                cat_prev["KR"] += prev_amt_krw
-                cat_prev2["KR"] += prev2_amt_krw
+                cat_cur["KR"] += my_amt; cat_prev["KR"] += prev_amt_krw; cat_prev2["KR"] += prev2_amt_krw
             
             stock_data_cache.append({
                 "price_krw": price_krw, "price_usd": price_usd, "my_amt": my_amt, 
-                "change_pct": change_pct, "today_profit": today_profit, "prev_change_pct": prev_change_pct
+                "change_pct": change_pct, "today_profit": today_profit, "prev_change_pct": prev_change_pct,
+                "sector": sector 
             })
+
+            avg_p = avg_prices[i]
+            real_p = realized_profits[i]
+            inv_krw = avg_p * my_qty 
+            
+            unreal = my_amt - inv_krw if my_qty > 0 else 0
+            total = unreal + real_p
+            prin = my_amt - total 
+            
+            real_avg = avg_p - (real_p / my_qty) if my_qty > 0 else 0
+            rtn = (total / prin * 100) if prin > 0 else 0
+            
+            add_profit_cat(sector, unreal, real_p, prin)
+            
+            profit_details.append({
+                "종목": get_brand(p['name'])["name"],
+                "평균단가": f"{avg_p:,.0f}원", "실제평균단가": f"{real_avg:,.0f}원", "현재가": f"{price_krw:,.0f}원",
+                "미실현수익": unreal, "실현수익": real_p, "총수익": total, "원금(조정)": prin, "수익률": rtn
+            })
+
+        sam_avg_p = avg_prices[15]
+        sam_real_p = realized_profits[15]
+        sam_inv_krw = sam_avg_p * sam_qty
+        sam_unreal = sam_amt - sam_inv_krw if sam_qty > 0 else 0
+        sam_total = sam_unreal + sam_real_p
+        sam_prin = sam_amt - sam_total
+        sam_real_avg = sam_avg_p - (sam_real_p / sam_qty) if sam_qty > 0 else 0
+        sam_rtn = (sam_total / sam_prin * 100) if sam_prin > 0 else 0
+
+        add_profit_cat("KR", sam_unreal, sam_real_p, sam_prin)
+        profit_details.append({
+            "종목": get_brand("삼성전자")["name"],
+            "평균단가": f"{sam_avg_p:,.0f}원", "실제평균단가": f"{sam_real_avg:,.0f}원", "현재가": f"{sam_price:,.0f}원",
+            "미실현수익": sam_unreal, "실현수익": sam_real_p, "총수익": sam_total, "원금(조정)": sam_prin, "수익률": sam_rtn
+        })
 
         total_asset = current_stock_assets + input_cash
         total_daily_return_pct = (total_today_profit / total_prev_asset) * 100 if total_prev_asset > 0 else 0
@@ -267,14 +352,16 @@ if execute_btn:
             try: requests.post(WEB_APP_URL, data={"date": now.strftime("%Y-%m-%d"), "asset": int(total_asset)})
             except: pass
 
-        tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER]
+        tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER, "^GSPC", "^KS11"]
         df_hist = yf.download(tickers, period="3y", progress=False)
 
         st.session_state.total_asset = total_asset
+        st.session_state.total_prev_asset = total_prev_asset
         st.session_state.rebalance_budget = total_asset - sam_amt
         st.session_state.total_today_profit = total_today_profit
         st.session_state.total_daily_return_pct = total_daily_return_pct
         st.session_state.total_d1_change_pct = total_d1_change_pct
+        st.session_state.sam_qty = sam_qty
         st.session_state.sam_amt = sam_amt
         st.session_state.sam_price = sam_price
         st.session_state.sam_change = sam_change
@@ -288,49 +375,83 @@ if execute_btn:
             "KR": cat_cur["KR"], "KR_P": cat_prev["KR"], "KR_P2": cat_prev2["KR"],
             "ETF": cat_cur["ETF"], "ETF_P": cat_prev["ETF"], "ETF_P2": cat_prev2["ETF"]
         }
+        st.session_state.profit_details = profit_details
+        st.session_state.cat_profit = cat_profit
         st.session_state.df_hist = df_hist
         st.session_state.analyzed = True
         st.rerun()
 
 # ==========================================
-# 5. 화면 출력부 (표 분리, D-1 열 추가, UI개선)
+# 5. 화면 출력부
 # ==========================================
 if st.session_state.analyzed:
-    st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
-    
     st.write("↕️ **정렬 기준 선택 (클릭 시 즉각 정렬)**")
     col_btn1, col_btn2, col_btn3, _ = st.columns([2.5, 2.5, 2.5, 2.5])
     if col_btn1.button("💰 실제금액 내림차순", use_container_width=True): st.session_state.sort_by = "실제금액숫자"
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
     if col_btn3.button("💸 오늘수익 내림차순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
 
-    # --- 5-1. 개별 종목표 생성 ---
+    # --- 공통 스타일링 ---
+    def style_change_color(val):
+        val_str = str(val)
+        if '▼' in val_str or '-' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
+        elif '▲' in val_str: return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;'
+        return ''
+
+    def style_profit_color(val):
+        val_str = str(val)
+        if '▼' in val_str or '-' in val_str: return 'color: #C2185B; font-weight: bold;'
+        elif '▲' in val_str: return 'color: #2E7D32; font-weight: bold;'
+        return ''
+
+    def style_d1_color(val):
+        val_str = str(val)
+        if '▼' in val_str or '-' in val_str: return 'color: #C2185B; font-weight: bold;'
+        elif '▲' in val_str: return 'color: #2E7D32; font-weight: bold;'
+        return ''
+
+    def style_text_color(val):
+        color = 'black'
+        if '매수' in str(val): color = '#D32F2F'
+        elif '매도' in str(val): color = '#1976D2'
+        return f'color: {color}; font-weight: bold;'
+
+    def format_profit(v):
+        if v > 0: return f"▲ {v:,.0f}원"
+        elif v < 0: return f"▼ {abs(v):,.0f}원"
+        return "0원"
+
+    def format_rtn(v):
+        if v > 0: return f"▲ {v:,.2f}%"
+        elif v < 0: return f"▼ {abs(v):,.2f}%"
+        return "0.00%"
+
+    # --- 5-1. 리밸런싱 현황표 ---
     stock_rows = []
     total_buy_cost = 0 
     budget_invest = st.session_state.rebalance_budget * 0.63  
 
     sam_change_str = f"▲ {st.session_state.sam_change:.2f}%" if st.session_state.sam_change > 0 else (f"▼ {abs(st.session_state.sam_change):.2f}%" if st.session_state.sam_change < 0 else "-")
     sam_prev_change_str = f"▲ {st.session_state.sam_prev_change:.2f}%" if st.session_state.sam_prev_change > 0 else (f"▼ {abs(st.session_state.sam_prev_change):.2f}%" if st.session_state.sam_prev_change < 0 else "-")
-    sam_profit_str = f"▲ {st.session_state.sam_profit:,.0f}원" if st.session_state.sam_profit > 0 else (f"▼ {abs(st.session_state.sam_profit):,.0f}원" if st.session_state.sam_profit < 0 else "-")
+    sam_profit_str = format_profit(st.session_state.sam_profit)
     
     stock_rows.append({
+        "구분": "KR", 
         "종목": get_brand("삼성전자")["name"], "현재가($)": "-", "현재가(₩)": f"{st.session_state.sam_price:,.0f}원", 
         "D-1": sam_prev_change_str, "등락률": sam_change_str, "오늘수익": sam_profit_str,
         "목표비중": "-", "실제비중": f"{(st.session_state.sam_amt/st.session_state.total_asset):.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
-        "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
+        "목표수량": "-", "내보유": str(int(st.session_state.sam_qty)), "실행": "🔒 매매불가",
         "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit
     })
 
     for i, p in enumerate(all_stocks):
         cached = st.session_state.stock_data_cache[i]
-        price_krw = cached['price_krw']
-        price_usd = cached['price_usd']
-        my_amt = cached['my_amt']
-        change_pct = cached['change_pct']
-        prev_change_pct = cached['prev_change_pct']
-        today_profit = cached['today_profit']
+        price_krw = cached['price_krw']; price_usd = cached['price_usd']
+        my_amt = cached['my_amt']; change_pct = cached['change_pct']
+        prev_change_pct = cached['prev_change_pct']; today_profit = cached['today_profit']
         my_qty = st.session_state.user_holdings[i]
+        sector_cat = cached['sector']
 
         if i < 5: 
             target_amt = st.session_state.rebalance_budget * p['ratio']
@@ -339,8 +460,7 @@ if st.session_state.analyzed:
             target_amt = budget_invest * p['ratio']
             display_target_ratio = f"{(0.63 * p['ratio']):.1%}"
 
-        if price_krw > 0: target_qty = round(target_amt / price_krw)
-        else: target_qty = 0
+        target_qty = round(target_amt / price_krw) if price_krw > 0 else 0
         actual_target_cost = target_qty * price_krw
         total_buy_cost += actual_target_cost
         
@@ -353,47 +473,25 @@ if st.session_state.analyzed:
         price_display = f"${price_usd:,.2f}" if p['country'] == "US" else "-"
         change_str = f"▲ {change_pct:.2f}%" if change_pct > 0 else (f"▼ {abs(change_pct):.2f}%" if change_pct < 0 else "-")
         prev_change_str = f"▲ {prev_change_pct:.2f}%" if prev_change_pct > 0 else (f"▼ {abs(prev_change_pct):.2f}%" if prev_change_pct < 0 else "-")
-        profit_str = f"▲ {today_profit:,.0f}원" if today_profit > 0 else (f"▼ {abs(today_profit):,.0f}원" if today_profit < 0 else "-")
-
+        
         stock_rows.append({
+            "구분": sector_cat,
             "종목": get_brand(p['name'])["name"], "현재가($)": price_display, "현재가(₩)": f"{price_krw:,.0f}원", 
-            "D-1": prev_change_str, "등락률": change_str, "오늘수익": profit_str,
+            "D-1": prev_change_str, "등락률": change_str, "오늘수익": format_profit(today_profit),
             "목표비중": display_target_ratio, "실제비중": current_ratio,
             "목표금액": f"{actual_target_cost:,.0f}원", "실제금액": f"{my_amt:,.0f}원",
             "목표수량": str(int(target_qty)), "내보유": str(int(my_qty)), "실행": action,
             "등락률숫자": change_pct, "실제금액숫자": my_amt, "오늘수익숫자": today_profit
         })
 
-    df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자'])
-
-    # --- 5-2. 요약표 생성 ---
-    sum_rows = []
-    for code, label in [("US", "🌎 해외주식 총합"), ("KR", "🇰🇷 국내주식 총합"), ("ETF", "🛡️ 현금성ETF 총합")]:
-        c_cur = st.session_state.cat_stats[code]
-        c_prev = st.session_state.cat_stats[code + "_P"]
-        c_prev2 = st.session_state.cat_stats[code + "_P2"]
-        
-        c_prof = c_cur - c_prev
-        c_pct = (c_prof / c_prev * 100) if c_prev > 0 else 0
-        c_d1_pct = ((c_prev - c_prev2) / c_prev2 * 100) if c_prev2 > 0 else 0
-
-        c_pct_str = f"▲ {c_pct:.2f}%" if c_pct > 0 else (f"▼ {abs(c_pct):.2f}%" if c_pct < 0 else "-")
-        c_d1_pct_str = f"▲ {c_d1_pct:.2f}%" if c_d1_pct > 0 else (f"▼ {abs(c_d1_pct):.2f}%" if c_d1_pct < 0 else "-")
-        c_prof_str = f"▲ {c_prof:,.0f}원" if c_prof > 0 else (f"▼ {abs(c_prof):,.0f}원" if c_prof < 0 else "-")
-        
-        sum_rows.append({
-            "종목": label, "현재가($)": "-", "현재가(₩)": "-", "D-1": c_d1_pct_str, "등락률": c_pct_str, "오늘수익": c_prof_str,
-            "목표비중": "-", "실제비중": f"{(c_cur / st.session_state.total_asset):.1%}",
-            "목표금액": "-", "실제금액": f"{c_cur:,.0f}원", "목표수량": "-", "내보유": "-", "실행": "-"
-        })
+    df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False)
     
-    remaining_cash = st.session_state.rebalance_budget - total_buy_cost
-    sum_rows.append({
-        "종목": get_brand("예수금")["name"], "현재가($)": "-", "현재가(₩)": "-", "D-1": "-", "등락률": "-", "오늘수익": "-",
-        "목표비중": "21.0%", "실제비중": f"{(st.session_state.input_cash / st.session_state.total_asset):.1%}",
-        "목표금액": f"{remaining_cash:,.0f}원", "실제금액": f"{st.session_state.input_cash:,.0f}원",
-        "목표수량": "-", "내보유": "-", "실행": "-"
-    })
+    filter_opt = st.radio("🔍 섹터 필터", ["전체보기", "🌎 미장 (US)", "🇰🇷 국장 (KR)", "🛡️ 현금성 (ETF)"], horizontal=True)
+    if filter_opt == "🌎 미장 (US)": df_stocks = df_stocks[df_stocks['구분'] == 'US']
+    elif filter_opt == "🇰🇷 국장 (KR)": df_stocks = df_stocks[df_stocks['구분'] == 'KR']
+    elif filter_opt == "🛡️ 현금성 (ETF)": df_stocks = df_stocks[df_stocks['구분'] == 'ETF']
+    
+    df_stocks = df_stocks.drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '구분'])
 
     tot_pct = st.session_state.total_daily_return_pct
     tot_d1_pct = st.session_state.total_d1_change_pct
@@ -403,44 +501,24 @@ if st.session_state.analyzed:
     tot_d1_pct_str = f"▲ {tot_d1_pct:.2f}%" if tot_d1_pct > 0 else (f"▼ {abs(tot_d1_pct):.2f}%" if tot_d1_pct < 0 else "-")
     tot_profit_str = f"▲ {tot_prof:,.0f}원" if tot_prof > 0 else (f"▼ {abs(tot_prof):,.0f}원" if tot_prof < 0 else "-")
     
-    sum_rows.append({
+    total_row_df = pd.DataFrame([{
         "종목": "📊 포트폴리오 총합", "현재가($)": "-", "현재가(₩)": "-", "D-1": tot_d1_pct_str, "등락률": tot_pct_str, "오늘수익": tot_profit_str,
         "목표비중": "100.0%", "실제비중": "100.0%", "목표금액": "-", "실제금액": f"{st.session_state.total_asset:,.0f}원",
         "목표수량": "-", "내보유": "-", "실행": "-"
-    })
+    }])
     
-    df_summary = pd.DataFrame(sum_rows)
+    df_stocks = pd.concat([df_stocks, total_row_df], ignore_index=True)
 
-    def style_change_color(val):
-        val_str = str(val)
-        if '▲' in val_str: return 'background-color: #CCFFCC; color: #2E7D32; font-weight: bold;'
-        elif '▼' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
-        return ''
+    st.subheader("📑 리밸런싱 상세 현황")
+    
+    def style_stocks_dataframe(row):
+        bg = 'white'
+        if '포트폴리오 총합' in row['종목']: bg = '#EEEEEE'
+        return [f'background-color: {bg}'] * len(row)
 
-    def style_d1_color(val):
-        val_str = str(val)
-        if '▲' in val_str: return 'color: #2E7D32; font-weight: bold;'
-        elif '▼' in val_str: return 'color: #C2185B; font-weight: bold;'
-        return ''
-
-    def style_text_color(val):
-        color = 'black'
-        if '매수' in str(val): color = '#D32F2F'
-        elif '매도' in str(val): color = '#1976D2'
-        return f'color: {color}; font-weight: bold;'
-
-    def style_summary_dataframe(row):
-        bg_color = 'white'
-        if '해외주식' in row['종목']: bg_color = '#FCE4EC'
-        elif '국내주식' in row['종목']: bg_color = '#E3F2FD'
-        elif '현금성ETF' in row['종목']: bg_color = '#FFF9C4'
-        elif '예수금' in row['종목']: bg_color = '#F1F8E9' 
-        elif '포트폴리오 총합' in row['종목']: bg_color = '#EEEEEE'
-        return [f'background-color: {bg_color}'] * len(row)
-
-    st.subheader("📑 개별 종목 상세 현황")
     st.dataframe(
-        df_stocks.style.map(style_text_color, subset=['실행'])
+        df_stocks.style.apply(style_stocks_dataframe, axis=1)
+                 .map(style_text_color, subset=['실행'])
                  .map(style_change_color, subset=['등락률', '오늘수익'])
                  .map(style_d1_color, subset=['D-1'])
                  .set_properties(**{'text-align': 'center'}),
@@ -449,17 +527,107 @@ if st.session_state.analyzed:
         hide_index=True, use_container_width=False, height=650 
     )
 
+    # --- 5-2. 섹터별 요약표 ---
     st.write("---")
-    st.subheader("📋 포트폴리오 요약표")
-    st.caption("※ 실제비중은 전체 포트폴리오(100%) 대비 차지하는 정확한 비율입니다.")
+    col_t1, col_t2 = st.columns([5, 5])
+    
+    with col_t1:
+        st.subheader("📋 섹터별 자산 요약")
+        sum_rows = []
+        for code, label in [("US", "🌎 해외주식 총합"), ("KR", "🇰🇷 국내주식 총합"), ("ETF", "🛡️ 현금성ETF 총합")]:
+            c_cur = st.session_state.cat_stats[code]
+            c_prev = st.session_state.cat_stats[code + "_P"]
+            c_prev2 = st.session_state.cat_stats[code + "_P2"]
+            c_prof = c_cur - c_prev
+            c_pct = (c_prof / c_prev * 100) if c_prev > 0 else 0
+            c_d1_pct = ((c_prev - c_prev2) / c_prev2 * 100) if c_prev2 > 0 else 0
+            sum_rows.append({
+                "구분": label, "D-1": format_rtn(c_d1_pct), "등락률": format_rtn(c_pct), "오늘수익": format_profit(c_prof),
+                "실제비중": f"{(c_cur / st.session_state.total_asset):.1%}", "실제금액": f"{c_cur:,.0f}원"
+            })
+        
+        remaining_cash = st.session_state.rebalance_budget - total_buy_cost
+        sum_rows.append({
+            "구분": get_brand("예수금")["name"], "D-1": "-", "등락률": "-", "오늘수익": "-",
+            "실제비중": f"{(st.session_state.input_cash / st.session_state.total_asset):.1%}", "실제금액": f"{st.session_state.input_cash:,.0f}원"
+        })
+
+        sum_rows.append({
+            "구분": "📊 포트폴리오 총합", "D-1": format_rtn(tot_d1_pct), "등락률": format_rtn(tot_pct), "오늘수익": format_profit(tot_prof),
+            "실제비중": "100.0%", "실제금액": f"{st.session_state.total_asset:,.0f}원"
+        })
+        
+        def style_summary_dataframe(row):
+            bg = 'white'
+            if '해외주식' in row['구분']: bg = '#FCE4EC'
+            elif '국내주식' in row['구분']: bg = '#E3F2FD'
+            elif '현금성ETF' in row['구분']: bg = '#FFF9C4'
+            elif '예수금' in row['구분']: bg = '#F1F8E9' 
+            elif '총합' in row['구분']: bg = '#EEEEEE'
+            return [f'background-color: {bg}'] * len(row)
+
+        st.dataframe(
+            pd.DataFrame(sum_rows).style.apply(style_summary_dataframe, axis=1)
+                      .map(style_change_color, subset=['등락률', '오늘수익'])
+                      .map(style_d1_color, subset=['D-1'])
+                      .set_properties(**{'text-align': 'center'}),
+            hide_index=True, use_container_width=True
+        )
+
+    # --- 5-3. 섹터별 수익 요약표 ---
+    with col_t2:
+        st.subheader("📋 섹터별 수익 요약 (실현 반영)")
+        cat_p = st.session_state.cat_profit
+        sec_profit_rows = []
+        for code, label in [("US", "🌎 해외주식"), ("KR", "🇰🇷 국내주식"), ("ETF", "🛡️ 현금성ETF"), ("ALL", "📊 포트폴리오 전체")]:
+            c = cat_p[code]
+            rtn = (c['total'] / c['prin'] * 100) if c['prin'] > 0 else 0
+            sec_profit_rows.append({
+                "구분": label, "미실현수익": format_profit(c['unreal']), "실현수익": format_profit(c['real']),
+                "총수익": format_profit(c['total']), "원금(조정)": f"{c['prin']:,.0f}원", "수익률": format_rtn(rtn)
+            })
+
+        st.dataframe(
+            pd.DataFrame(sec_profit_rows).style.apply(style_summary_dataframe, axis=1)
+                      .map(style_profit_color, subset=['미실현수익', '실현수익', '총수익', '수익률'])
+                      .set_properties(**{'text-align': 'center'}),
+            hide_index=True, use_container_width=True
+        )
+
+    # --- 5-4. 종목별 상세 수익 현황 ---
+    st.write("---")
+    st.subheader("📑 종목별 상세 수익 현황 (실현손익 반영)")
+    df_profits = pd.DataFrame(st.session_state.profit_details)
+    
+    tot_unreal = st.session_state.cat_profit["ALL"]["unreal"]
+    tot_real = st.session_state.cat_profit["ALL"]["real"]
+    tot_total = st.session_state.cat_profit["ALL"]["total"]
+    tot_prin = st.session_state.cat_profit["ALL"]["prin"]
+    tot_profit_rtn = (tot_total / tot_prin * 100) if tot_prin > 0 else 0
+    
+    profit_total_row = pd.DataFrame([{
+        "종목": "📊 포트폴리오 총합", "평균단가": "-", "실제평균단가": "-", "현재가": "-",
+        "미실현수익": tot_unreal, "실현수익": tot_real, "총수익": tot_total, "원금(조정)": tot_prin, "수익률": tot_profit_rtn
+    }])
+    df_profits = pd.concat([df_profits, profit_total_row], ignore_index=True)
+
+    df_profits['미실현수익'] = df_profits['미실현수익'].apply(format_profit)
+    df_profits['실현수익'] = df_profits['실현수익'].apply(format_profit)
+    df_profits['총수익'] = df_profits['총수익'].apply(format_profit)
+    df_profits['수익률'] = df_profits['수익률'].apply(format_rtn)
+    df_profits['원금(조정)'] = df_profits['원금(조정)'].apply(lambda x: f"{x:,.0f}원" if isinstance(x, (int, float)) else x)
+
+    def style_profit_dataframe(row):
+        bg = 'white'
+        if '포트폴리오 총합' in row['종목']: bg = '#EEEEEE'
+        return [f'background-color: {bg}'] * len(row)
+
     st.dataframe(
-        df_summary.style.apply(style_summary_dataframe, axis=1)
-                  .map(style_change_color, subset=['등락률', '오늘수익'])
-                  .map(style_d1_color, subset=['D-1'])
+        df_profits.style.apply(style_profit_dataframe, axis=1)
+                  .map(style_profit_color, subset=['미실현수익', '실현수익', '총수익', '수익률'])
                   .set_properties(**{'text-align': 'center'}),
-        column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
         column_config={"종목": st.column_config.TextColumn("종목", width=160)},
-        hide_index=True, use_container_width=False, height=250 
+        hide_index=True, use_container_width=False, height=650
     )
 
     # ==========================================
@@ -470,39 +638,78 @@ if st.session_state.analyzed:
     
     with col_chart:
         st.subheader("📉 자산 성장 시뮬레이션 (3년)")
-        tab1, tab2 = st.tabs(["🕯️ 총자산 캔들형", "📊 층별 누적 영역형"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🕯️ 총자산 캔들", "📊 층별 누적 영역", "🦅 내 미장 포트폴리오", "🐅 내 국장 포트폴리오"])
         
         try:
             df_hist = st.session_state.df_hist
             
-            def get_series(col):
-                s = pd.Series(st.session_state.input_cash, index=df_hist.index) 
-                s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
+            # ★ 1. 에러 없던 가장 완벽했던 환율 종가 고정 + 심플 OHLC 로직 복구
+            def get_custom_series(col, sector):
+                s = pd.Series(0.0, index=df_hist.index)
+                if sector in ['ALL', 'KR']:
+                    s += df_hist[col][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
+                if sector == 'ALL':
+                    s += st.session_state.input_cash
+
+                # 환율은 무조건 그 날의 종가(Close)만 사용하여 곱함 (기형적인 꼬리 방지)
+                fx_rate = df_hist['Close']['KRW=X'].ffill().bfill()
+                
                 for i, p in enumerate(all_stocks):
                     qty = st.session_state.user_holdings[i]
                     if qty > 0:
                         tkr = p['ticker']
-                        if p['country'] == 'US': s += df_hist[col][tkr].ffill().bfill() * df_hist[col]['KRW=X'].ffill().bfill() * qty
-                        else: s += df_hist[col][tkr].ffill().bfill() * qty
+                        p_sec = "US" if p['country'] == 'US' else "KR"
+                        if sector == 'ALL' or sector == p_sec:
+                            if p['country'] == 'US':
+                                s += df_hist[col][tkr].ffill().bfill() * fx_rate * qty
+                            else:
+                                s += df_hist[col][tkr].ffill().bfill() * qty
                 return s
 
-            hist_O = get_series('Open')
-            hist_H = get_series('High')
-            hist_L = get_series('Low')
-            hist_C = get_series('Close')
+            # 전체 자산 시리즈
+            hist_O = get_custom_series('Open', 'ALL')
+            hist_H = get_custom_series('High', 'ALL')
+            hist_L = get_custom_series('Low', 'ALL')
+            hist_C = get_custom_series('Close', 'ALL')
 
-            real_time_total = st.session_state.total_asset
+            # 미장 시리즈
+            us_O = get_custom_series('Open', 'US')
+            us_H = get_custom_series('High', 'US')
+            us_L = get_custom_series('Low', 'US')
+            us_C = get_custom_series('Close', 'US')
+
+            # 국장 시리즈
+            kr_O = get_custom_series('Open', 'KR')
+            kr_H = get_custom_series('High', 'KR')
+            kr_L = get_custom_series('Low', 'KR')
+            kr_C = get_custom_series('Close', 'KR')
+
+            # ★ 2. 가장 마지막(최근) 캔들이 이상해지지 않도록 시가/종가/고가/저가를 안전하게 보정
             if len(hist_C) > 0:
-                hist_C.iloc[-1] = real_time_total
-                if hist_H.iloc[-1] < real_time_total: hist_H.iloc[-1] = real_time_total
-                if hist_L.iloc[-1] > real_time_total: hist_L.iloc[-1] = real_time_total
+                # 전체
+                hist_C.iloc[-1] = st.session_state.total_asset
+                hist_O.iloc[-1] = st.session_state.total_prev_asset 
+                hist_H.iloc[-1] = max(hist_H.iloc[-1], hist_C.iloc[-1], hist_O.iloc[-1])
+                hist_L.iloc[-1] = min(hist_L.iloc[-1], hist_C.iloc[-1], hist_O.iloc[-1])
+                
+                # 미장
+                us_C.iloc[-1] = st.session_state.cat_stats['US']
+                us_O.iloc[-1] = st.session_state.cat_stats['US_P']
+                us_H.iloc[-1] = max(us_H.iloc[-1], us_C.iloc[-1], us_O.iloc[-1])
+                us_L.iloc[-1] = min(us_L.iloc[-1], us_C.iloc[-1], us_O.iloc[-1])
+                
+                # 국장
+                kr_C.iloc[-1] = st.session_state.cat_stats['KR']
+                kr_O.iloc[-1] = st.session_state.cat_stats['KR_P']
+                kr_H.iloc[-1] = max(kr_H.iloc[-1], kr_C.iloc[-1], kr_O.iloc[-1])
+                kr_L.iloc[-1] = min(kr_L.iloc[-1], kr_C.iloc[-1], kr_O.iloc[-1])
 
+            # 누적 차트용 데이터
             s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
             s_etf = pd.Series(0, index=df_hist.index)
             s_us = pd.Series(0, index=df_hist.index)
             s_kr = pd.Series(0, index=df_hist.index)
-            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * SAMSUNG_QTY
-            
+            s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
             for i, p in enumerate(all_stocks):
                 qty = st.session_state.user_holdings[i]
                 if qty > 0:
@@ -513,33 +720,36 @@ if st.session_state.analyzed:
                     elif p['country'] == 'US': s_us += val
                     else: s_kr += val
 
-            ath_val = hist_H.max()
-            ath_date = hist_H.idxmax()
-            last_date = df_hist.index[-1]
-            zoom_start = last_date - pd.Timedelta(days=90)
-            
-            mask = (df_hist.index >= zoom_start)
-            if mask.any():
-                low_3m_val = hist_L[mask].min()
-                low_3m_date = hist_L[mask].idxmin()
-                max_y = hist_H[mask].max() * 1.10
-            else:
-                low_3m_val = hist_L.min()
-                low_3m_date = hist_L.idxmin()
-                max_y = hist_H.max() * 1.10
+            def get_chart_bounds(s_H, s_L, s_C, mask_series=None):
+                # ★ 3. 휴장일에는 빈 데이터(NaN)를 유지하도록 하여 평평한 캔들이 그려지는 현상(5/5 오류) 차단
+                if mask_series is not None:
+                    valid_idx = mask_series.dropna().index
+                    s_H = s_H.reindex(valid_idx)
+                    s_L = s_L.reindex(valid_idx)
+                    s_C = s_C.reindex(valid_idx)
+                
+                a_val = s_H.max(); a_date = s_H.idxmax()
+                l_date = s_C.index[-1]
+                z_start = l_date - pd.Timedelta(days=90)
+                mask = (s_C.index >= z_start)
+                
+                if mask.any():
+                    l_3m_val = s_L[mask].min(); l_3m_date = s_L[mask].idxmin()
+                    m_y = s_H[mask].max() * 1.10
+                else:
+                    l_3m_val = s_L.min(); l_3m_date = s_L.idxmin()
+                    m_y = s_H.max() * 1.10
+                mi_y = max(0, l_3m_val * 0.98) 
+                c_val = s_C.iloc[-1]; c_date = s_C.index[-1]
+                return a_val, a_date, l_3m_val, l_3m_date, c_val, c_date, z_start, l_date, mi_y, m_y, s_H.index
 
-            min_y = max(0, low_3m_val * 0.98) 
-            curr_val = hist_C.iloc[-1]
-            curr_date = hist_C.index[-1]
-
-            # ★ 월 구분선과 연 구분선 분리!
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
+            # 탭 1: 총자산 캔들
             with tab1:
-                fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index,
-                                open=hist_O.values, high=hist_H.values,
-                                low=hist_L.values, close=hist_C.values, name='총자산 캔들')])
+                ath_val, ath_date, low_3m_val, low_3m_date, curr_val, curr_date, zoom_start, last_date, min_y, max_y, valid_idx = get_chart_bounds(hist_H, hist_L, hist_C)
+                fig_candle = go.Figure(data=[go.Candlestick(x=valid_idx, open=hist_O[valid_idx], high=hist_H[valid_idx], low=hist_L[valid_idx], close=hist_C[valid_idx], name='총자산')])
                 
                 fig_candle.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
                 fig_candle.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
@@ -553,14 +763,12 @@ if st.session_state.analyzed:
                 fig_candle.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])]) 
                 fig_candle.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
-                    if d in first_days_year:
-                        fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else:
-                        fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    if d in first_days_year: fig_candle.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_candle, use_container_width=True)
 
+            # 탭 2: 층별 누적 영역
             with tab2:
                 fig_area = go.Figure()
                 fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
@@ -581,13 +789,52 @@ if st.session_state.analyzed:
                 fig_area.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangebreaks=[dict(bounds=["sat", "mon"])])
                 fig_area.update_layout(xaxis_range=[zoom_start, last_date], yaxis_range=[min_y, max_y], margin=dict(l=0, r=0, t=30, b=0), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 
-                # ★ 연 구분선은 수직 굵은 검정 실선, 월 구분선은 옅은 점선
                 for d in first_days_month: 
-                    if d in first_days_year:
-                        fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
-                    else:
-                        fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    if d in first_days_year: fig_area.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                    else: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
+
+            # 탭 3: 미장 전용 포트폴리오
+            with tab3:
+                # 미국장(S&P500)이 열린 날짜만 추려내어 휴장일 차트 오류 방지
+                u_ath_val, u_ath_date, u_low_3m_val, u_low_3m_date, u_curr_val, u_curr_date, u_z_start, u_l_date, u_min_y, u_max_y, u_idx = get_chart_bounds(us_H, us_L, us_C, mask_series=df_hist['Close']['^GSPC'])
+                if us_H.max() > 0:
+                    fig_us = go.Figure(data=[go.Candlestick(x=u_idx, open=us_O[u_idx], high=us_H[u_idx], low=us_L[u_idx], close=us_C[u_idx], name='미장 포트')])
+                    fig_us.add_hline(y=u_ath_val, line_dash="dash", line_color="gray", opacity=0.7)
+                    fig_us.add_hline(y=u_low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
+                    fig_us.add_hline(y=u_curr_val, line_dash="dash", line_color="red", opacity=0.7)
+                    fig_us.add_annotation(x=u_ath_date, y=u_ath_val, text=f"🚩 미장 고점: {u_ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
+                    fig_us.add_annotation(x=u_curr_date, y=u_curr_val, text=f"🔴 현재가: {u_curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
+                    fig_us.update_yaxes(tickformat=",.0f")
+                    fig_us.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])])
+                    fig_us.update_layout(xaxis_range=[u_z_start, u_l_date], yaxis_range=[u_min_y, u_max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
+                    for d in first_days_month: 
+                        if d in first_days_year: fig_us.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                        else: fig_us.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    st.plotly_chart(fig_us, use_container_width=True)
+                else:
+                    st.info("현재 미장(US) 종목을 보유하고 있지 않습니다.")
+
+            # 탭 4: 국장 전용 포트폴리오
+            with tab4:
+                # 한국장(KOSPI)이 열린 날짜만 추려내어 5/5일 같은 휴장일 차트 오류 방지
+                k_ath_val, k_ath_date, k_low_3m_val, k_low_3m_date, k_curr_val, k_curr_date, k_z_start, k_l_date, k_min_y, k_max_y, k_idx = get_chart_bounds(kr_H, kr_L, kr_C, mask_series=df_hist['Close']['^KS11'])
+                if kr_H.max() > 0:
+                    fig_kr = go.Figure(data=[go.Candlestick(x=k_idx, open=kr_O[k_idx], high=kr_H[k_idx], low=kr_L[k_idx], close=kr_C[k_idx], name='국장 포트')])
+                    fig_kr.add_hline(y=k_ath_val, line_dash="dash", line_color="gray", opacity=0.7)
+                    fig_kr.add_hline(y=k_low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
+                    fig_kr.add_hline(y=k_curr_val, line_dash="dash", line_color="red", opacity=0.7)
+                    fig_kr.add_annotation(x=k_ath_date, y=k_ath_val, text=f"🚩 국장 고점: {k_ath_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=0, ay=-45, bgcolor="white", bordercolor="gray")
+                    fig_kr.add_annotation(x=k_curr_date, y=k_curr_val, text=f"🔴 현재가: {k_curr_val/10000:,.0f}만원", showarrow=True, arrowhead=1, ax=-70, ay=0, bgcolor="white", bordercolor="red")
+                    fig_kr.update_yaxes(tickformat=",.0f")
+                    fig_kr.update_xaxes(tickformat="%Y년 %m월 %d일", hoverformat="%Y년 %m월 %d일", rangeslider_visible=False, rangebreaks=[dict(bounds=["sat", "mon"])])
+                    fig_kr.update_layout(xaxis_range=[k_z_start, k_l_date], yaxis_range=[k_min_y, k_max_y], margin=dict(l=0, r=0, t=30, b=0), height=500)
+                    for d in first_days_month: 
+                        if d in first_days_year: fig_kr.add_vline(x=d, line_dash="solid", line_color="black", line_width=1.5, opacity=0.8)
+                        else: fig_kr.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
+                    st.plotly_chart(fig_kr, use_container_width=True)
+                else:
+                    st.info("현재 국장(KR) 종목을 보유하고 있지 않습니다.")
 
         except Exception as e:
             st.warning("차트 데이터를 불러오는 데 일시적인 문제가 발생했습니다.")
