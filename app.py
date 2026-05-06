@@ -78,7 +78,6 @@ def get_brand(raw_name):
 @st.cache_data(ttl=600)
 def get_current_exchange_rate():
     try: 
-        # 실시간 데이터(1d)를 우선 가져오고, 없으면 5d로 보완
         hist = yf.Ticker("KRW=X").history(period="1d")
         if not hist.empty: return float(hist['Close'].iloc[-1])
         else: return float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
@@ -228,8 +227,8 @@ if execute_btn:
 
     with st.spinner('실시간 시세 및 3년치 글로벌 차트 로딩 중... (약 15초 소요)'):
         try: 
-            fx_hist = yf.Ticker("KRW=X").history(period="1d")
-            if not fx_hist.empty: exchange_rate = float(fx_hist['Close'].iloc[-1])
+            fx_hist_real = yf.Ticker("KRW=X").history(period="1d")
+            if not fx_hist_real.empty: exchange_rate = float(fx_hist_real['Close'].iloc[-1])
             else: exchange_rate = float(yf.Ticker("KRW=X").history(period="5d")['Close'].iloc[-1])
         except: exchange_rate = 1400.0
         
@@ -353,10 +352,11 @@ if execute_btn:
             try: requests.post(WEB_APP_URL, data={"date": now.strftime("%Y-%m-%d"), "asset": int(total_asset)})
             except: pass
 
-        tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER]
+        tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER, "^GSPC", "^KS11"]
         df_hist = yf.download(tickers, period="3y", progress=False)
 
         st.session_state.total_asset = total_asset
+        st.session_state.total_prev_asset = total_prev_asset
         st.session_state.rebalance_budget = total_asset - sam_amt
         st.session_state.total_today_profit = total_today_profit
         st.session_state.total_daily_return_pct = total_daily_return_pct
@@ -391,7 +391,7 @@ if st.session_state.analyzed:
     if col_btn2.button("📈 등락률 내림차순", use_container_width=True): st.session_state.sort_by = "등락률숫자"
     if col_btn3.button("💸 오늘수익 내림차순", use_container_width=True): st.session_state.sort_by = "오늘수익숫자"
 
-    # --- 공통 스타일링 함수 ---
+    # --- 공통 스타일링 ---
     def style_change_color(val):
         val_str = str(val)
         if '▼' in val_str or '-' in val_str: return 'background-color: #FFD1DC; color: #C2185B; font-weight: bold;'
@@ -486,7 +486,6 @@ if st.session_state.analyzed:
 
     df_stocks = pd.DataFrame(stock_rows).sort_values(by=st.session_state.sort_by, ascending=False)
     
-    # 버튼식 종목 필터
     filter_opt = st.radio("🔍 섹터 필터", ["전체보기", "🌎 미장 (US)", "🇰🇷 국장 (KR)", "🛡️ 현금성 (ETF)"], horizontal=True)
     if filter_opt == "🌎 미장 (US)": df_stocks = df_stocks[df_stocks['구분'] == 'US']
     elif filter_opt == "🇰🇷 국장 (KR)": df_stocks = df_stocks[df_stocks['구분'] == 'KR']
@@ -639,13 +638,12 @@ if st.session_state.analyzed:
     
     with col_chart:
         st.subheader("📉 자산 성장 시뮬레이션 (3년)")
-        # ★ 차트 탭 원복
         tab1, tab2, tab3, tab4 = st.tabs(["🕯️ 총자산 캔들", "📊 층별 누적 영역", "🦅 내 미장 포트폴리오", "🐅 내 국장 포트폴리오"])
         
         try:
             df_hist = st.session_state.df_hist
             
-            # ★ 과거에 가장 완벽했던 "심플 합산 로직(원래 코드)" 복구 완료!
+            # ★ 1. 에러 없던 가장 완벽했던 환율 종가 고정 + 심플 OHLC 로직 복구
             def get_custom_series(col, sector):
                 s = pd.Series(0.0, index=df_hist.index)
                 if sector in ['ALL', 'KR']:
@@ -653,6 +651,9 @@ if st.session_state.analyzed:
                 if sector == 'ALL':
                     s += st.session_state.input_cash
 
+                # 환율은 무조건 그 날의 종가(Close)만 사용하여 곱함 (기형적인 꼬리 방지)
+                fx_rate = df_hist['Close']['KRW=X'].ffill().bfill()
+                
                 for i, p in enumerate(all_stocks):
                     qty = st.session_state.user_holdings[i]
                     if qty > 0:
@@ -660,46 +661,55 @@ if st.session_state.analyzed:
                         p_sec = "US" if p['country'] == 'US' else "KR"
                         if sector == 'ALL' or sector == p_sec:
                             if p['country'] == 'US':
-                                s += df_hist[col][tkr].ffill().bfill() * df_hist[col]['KRW=X'].ffill().bfill() * qty
+                                s += df_hist[col][tkr].ffill().bfill() * fx_rate * qty
                             else:
                                 s += df_hist[col][tkr].ffill().bfill() * qty
                 return s
 
-            # 시리즈 생성 (꼬리가 예쁘게 나오던 오리지널 방식)
+            # 전체 자산 시리즈
             hist_O = get_custom_series('Open', 'ALL')
             hist_H = get_custom_series('High', 'ALL')
             hist_L = get_custom_series('Low', 'ALL')
             hist_C = get_custom_series('Close', 'ALL')
 
+            # 미장 시리즈
             us_O = get_custom_series('Open', 'US')
             us_H = get_custom_series('High', 'US')
             us_L = get_custom_series('Low', 'US')
             us_C = get_custom_series('Close', 'US')
 
+            # 국장 시리즈
             kr_O = get_custom_series('Open', 'KR')
             kr_H = get_custom_series('High', 'KR')
             kr_L = get_custom_series('Low', 'KR')
             kr_C = get_custom_series('Close', 'KR')
 
-            # 현재가 강제 동기화 (꼬리 보정)
+            # ★ 2. 가장 마지막(최근) 캔들이 이상해지지 않도록 시가/종가/고가/저가를 안전하게 보정
             if len(hist_C) > 0:
+                # 전체
                 hist_C.iloc[-1] = st.session_state.total_asset
-                us_C.iloc[-1] = st.session_state.cat_stats['US']
-                kr_C.iloc[-1] = st.session_state.cat_stats['KR']
+                hist_O.iloc[-1] = st.session_state.total_prev_asset 
+                hist_H.iloc[-1] = max(hist_H.iloc[-1], hist_C.iloc[-1], hist_O.iloc[-1])
+                hist_L.iloc[-1] = min(hist_L.iloc[-1], hist_C.iloc[-1], hist_O.iloc[-1])
                 
-                if hist_H.iloc[-1] < hist_C.iloc[-1]: hist_H.iloc[-1] = hist_C.iloc[-1]
-                if hist_L.iloc[-1] > hist_C.iloc[-1]: hist_L.iloc[-1] = hist_C.iloc[-1]
-                if us_H.iloc[-1] < us_C.iloc[-1]: us_H.iloc[-1] = us_C.iloc[-1]
-                if us_L.iloc[-1] > us_C.iloc[-1]: us_L.iloc[-1] = us_C.iloc[-1]
-                if kr_H.iloc[-1] < kr_C.iloc[-1]: kr_H.iloc[-1] = kr_C.iloc[-1]
-                if kr_L.iloc[-1] > kr_C.iloc[-1]: kr_L.iloc[-1] = kr_C.iloc[-1]
+                # 미장
+                us_C.iloc[-1] = st.session_state.cat_stats['US']
+                us_O.iloc[-1] = st.session_state.cat_stats['US_P']
+                us_H.iloc[-1] = max(us_H.iloc[-1], us_C.iloc[-1], us_O.iloc[-1])
+                us_L.iloc[-1] = min(us_L.iloc[-1], us_C.iloc[-1], us_O.iloc[-1])
+                
+                # 국장
+                kr_C.iloc[-1] = st.session_state.cat_stats['KR']
+                kr_O.iloc[-1] = st.session_state.cat_stats['KR_P']
+                kr_H.iloc[-1] = max(kr_H.iloc[-1], kr_C.iloc[-1], kr_O.iloc[-1])
+                kr_L.iloc[-1] = min(kr_L.iloc[-1], kr_C.iloc[-1], kr_O.iloc[-1])
 
+            # 누적 차트용 데이터
             s_cash = pd.Series(st.session_state.input_cash, index=df_hist.index) 
             s_etf = pd.Series(0, index=df_hist.index)
             s_us = pd.Series(0, index=df_hist.index)
             s_kr = pd.Series(0, index=df_hist.index)
             s_kr += df_hist['Close'][SAMSUNG_TICKER].ffill().bfill() * st.session_state.sam_qty
-            
             for i, p in enumerate(all_stocks):
                 qty = st.session_state.user_holdings[i]
                 if qty > 0:
@@ -710,11 +720,19 @@ if st.session_state.analyzed:
                     elif p['country'] == 'US': s_us += val
                     else: s_kr += val
 
-            def get_chart_bounds(s_H, s_L, s_C):
+            def get_chart_bounds(s_H, s_L, s_C, mask_series=None):
+                # ★ 3. 휴장일에는 빈 데이터(NaN)를 유지하도록 하여 평평한 캔들이 그려지는 현상(5/5 오류) 차단
+                if mask_series is not None:
+                    valid_idx = mask_series.dropna().index
+                    s_H = s_H.reindex(valid_idx)
+                    s_L = s_L.reindex(valid_idx)
+                    s_C = s_C.reindex(valid_idx)
+                
                 a_val = s_H.max(); a_date = s_H.idxmax()
-                l_date = df_hist.index[-1]
+                l_date = s_C.index[-1]
                 z_start = l_date - pd.Timedelta(days=90)
-                mask = (df_hist.index >= z_start)
+                mask = (s_C.index >= z_start)
+                
                 if mask.any():
                     l_3m_val = s_L[mask].min(); l_3m_date = s_L[mask].idxmin()
                     m_y = s_H[mask].max() * 1.10
@@ -723,14 +741,15 @@ if st.session_state.analyzed:
                     m_y = s_H.max() * 1.10
                 mi_y = max(0, l_3m_val * 0.98) 
                 c_val = s_C.iloc[-1]; c_date = s_C.index[-1]
-                return a_val, a_date, l_3m_val, l_3m_date, c_val, c_date, z_start, l_date, mi_y, m_y
+                return a_val, a_date, l_3m_val, l_3m_date, c_val, c_date, z_start, l_date, mi_y, m_y, s_H.index
 
             first_days_month = [group.index[0] for _, group in df_hist.groupby([df_hist.index.year, df_hist.index.month])]
             first_days_year = [group.index[0] for _, group in df_hist.groupby(df_hist.index.year)]
 
+            # 탭 1: 총자산 캔들
             with tab1:
-                ath_val, ath_date, low_3m_val, low_3m_date, curr_val, curr_date, zoom_start, last_date, min_y, max_y = get_chart_bounds(hist_H, hist_L, hist_C)
-                fig_candle = go.Figure(data=[go.Candlestick(x=hist_C.index, open=hist_O.values, high=hist_H.values, low=hist_L.values, close=hist_C.values, name='총자산')])
+                ath_val, ath_date, low_3m_val, low_3m_date, curr_val, curr_date, zoom_start, last_date, min_y, max_y, valid_idx = get_chart_bounds(hist_H, hist_L, hist_C)
+                fig_candle = go.Figure(data=[go.Candlestick(x=valid_idx, open=hist_O[valid_idx], high=hist_H[valid_idx], low=hist_L[valid_idx], close=hist_C[valid_idx], name='총자산')])
                 
                 fig_candle.add_hline(y=ath_val, line_dash="dash", line_color="gray", opacity=0.7)
                 fig_candle.add_hline(y=low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
@@ -749,6 +768,7 @@ if st.session_state.analyzed:
                     else: fig_candle.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_candle, use_container_width=True)
 
+            # 탭 2: 층별 누적 영역
             with tab2:
                 fig_area = go.Figure()
                 fig_area.add_trace(go.Scatter(x=df_hist.index, y=s_cash, mode='none', fill='tozeroy', name='💵 예수금', stackgroup='one', fillcolor='#85BB65'))
@@ -774,10 +794,12 @@ if st.session_state.analyzed:
                     else: fig_area.add_vline(x=d, line_dash="dot", line_color="rgba(150,150,150,0.5)", line_width=1)
                 st.plotly_chart(fig_area, use_container_width=True)
 
+            # 탭 3: 미장 전용 포트폴리오
             with tab3:
-                u_ath_val, u_ath_date, u_low_3m_val, u_low_3m_date, u_curr_val, u_curr_date, u_z_start, u_l_date, u_min_y, u_max_y = get_chart_bounds(us_H, us_L, us_C)
+                # 미국장(S&P500)이 열린 날짜만 추려내어 휴장일 차트 오류 방지
+                u_ath_val, u_ath_date, u_low_3m_val, u_low_3m_date, u_curr_val, u_curr_date, u_z_start, u_l_date, u_min_y, u_max_y, u_idx = get_chart_bounds(us_H, us_L, us_C, mask_series=df_hist['Close']['^GSPC'])
                 if us_H.max() > 0:
-                    fig_us = go.Figure(data=[go.Candlestick(x=us_C.index, open=us_O.values, high=us_H.values, low=us_L.values, close=us_C.values, name='미장 포트')])
+                    fig_us = go.Figure(data=[go.Candlestick(x=u_idx, open=us_O[u_idx], high=us_H[u_idx], low=us_L[u_idx], close=us_C[u_idx], name='미장 포트')])
                     fig_us.add_hline(y=u_ath_val, line_dash="dash", line_color="gray", opacity=0.7)
                     fig_us.add_hline(y=u_low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
                     fig_us.add_hline(y=u_curr_val, line_dash="dash", line_color="red", opacity=0.7)
@@ -793,10 +815,12 @@ if st.session_state.analyzed:
                 else:
                     st.info("현재 미장(US) 종목을 보유하고 있지 않습니다.")
 
+            # 탭 4: 국장 전용 포트폴리오
             with tab4:
-                k_ath_val, k_ath_date, k_low_3m_val, k_low_3m_date, k_curr_val, k_curr_date, k_z_start, k_l_date, k_min_y, k_max_y = get_chart_bounds(kr_H, kr_L, kr_C)
+                # 한국장(KOSPI)이 열린 날짜만 추려내어 5/5일 같은 휴장일 차트 오류 방지
+                k_ath_val, k_ath_date, k_low_3m_val, k_low_3m_date, k_curr_val, k_curr_date, k_z_start, k_l_date, k_min_y, k_max_y, k_idx = get_chart_bounds(kr_H, kr_L, kr_C, mask_series=df_hist['Close']['^KS11'])
                 if kr_H.max() > 0:
-                    fig_kr = go.Figure(data=[go.Candlestick(x=kr_C.index, open=kr_O.values, high=kr_H.values, low=kr_L.values, close=kr_C.values, name='국장 포트')])
+                    fig_kr = go.Figure(data=[go.Candlestick(x=k_idx, open=kr_O[k_idx], high=kr_H[k_idx], low=kr_L[k_idx], close=kr_C[k_idx], name='국장 포트')])
                     fig_kr.add_hline(y=k_ath_val, line_dash="dash", line_color="gray", opacity=0.7)
                     fig_kr.add_hline(y=k_low_3m_val, line_dash="dash", line_color="gray", opacity=0.7)
                     fig_kr.add_hline(y=k_curr_val, line_dash="dash", line_color="red", opacity=0.7)
