@@ -380,6 +380,7 @@ if st.session_state.analyzed:
     stock_rows = []
     pnl_rows = [] 
     actions_needed = [] 
+    total_buy_cost = 0  # <--- 필수 변수 선언!
     
     reb_budget = st.session_state.rebalance_budget
     budget_invest = reb_budget * 0.63  
