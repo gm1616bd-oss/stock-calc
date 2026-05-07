@@ -72,12 +72,11 @@ def get_brand(raw_name):
     return brand_meta.get(key, {"name": raw_name, "color": "#9E9E9E"})
 
 # ==========================================
-# 2. 데이터 캐싱 함수 (환율 오류 수정 반영)
+# 2. 데이터 캐싱 함수
 # ==========================================
 @st.cache_data(ttl=600)
 def get_current_exchange_rate():
     try: 
-        # 최근 5일 데이터를 불러와 가장 마지막 유효한 값을 사용 (월요일/휴일 누락 방지)
         hist = yf.Ticker("KRW=X").history(period="5d")
         return hist['Close'].dropna().iloc[-1]
     except: 
@@ -169,11 +168,9 @@ st.write("---")
 if execute_btn:
     st.query_params["raw_data"] = master_input
     
-    # 입력 파싱 및 0패딩 (총 48개 숫자 추출)
     values = []
     if master_input.strip() != "":
         try:
-            # 쉼표(,) 제거 후 띄어쓰기 기준으로 파싱
             values = list(map(float, master_input.replace(",", "").split()))
         except ValueError:
             st.error("숫자와 띄어쓰기만 입력해주세요!")
@@ -191,7 +188,6 @@ if execute_btn:
 
     with st.spinner('실시간 시세 및 차트 로딩 중... (약 15초 소요)'):
         try: 
-            # 환율 오류방지 로직 (execute 내부도 5일치로 통일)
             hist_exc = yf.Ticker("KRW=X").history(period="5d")
             exchange_rate = hist_exc['Close'].dropna().iloc[-1]
         except: 
@@ -207,7 +203,7 @@ if execute_btn:
         cat_prev = {"US": 0, "KR": 0, "ETF": 0}
         cat_prev2 = {"US": 0, "KR": 0, "ETF": 0}
 
-        # 삼성전자 계산 (손익 포함)
+        # 삼성전자 계산
         sam_price, sam_change, sam_prev, sam_prev_change, sam_d2 = get_real_price_and_change(SAMSUNG_TICKER, "KR")
         sam_amt = sam_price * SAMSUNG_QTY
         sam_profit_today = sam_amt - (sam_prev * SAMSUNG_QTY)
@@ -219,7 +215,6 @@ if execute_btn:
         cat_prev["KR"] += (sam_prev * SAMSUNG_QTY)
         cat_prev2["KR"] += (sam_d2 * SAMSUNG_QTY)
         
-        # PnL (삼성전자)
         sam_unreal_p = (sam_price - sam_avg_price) * SAMSUNG_QTY if sam_avg_price > 0 else 0
         sam_tot_p = sam_realized_profit + sam_unreal_p
         sam_actual_avg_p = sam_avg_price - (sam_realized_profit / SAMSUNG_QTY) if SAMSUNG_QTY > 0 else sam_avg_price
@@ -247,7 +242,6 @@ if execute_btn:
             avg_p = user_avg_prices[i]
             real_p = user_realized_profits[i]
             
-            # PnL 계산
             unreal_p = (price_krw - avg_p) * my_qty if avg_p > 0 else 0
             tot_p = real_p + unreal_p
             actual_avg_p = avg_p - (real_p / my_qty) if my_qty > 0 else avg_p
@@ -295,7 +289,6 @@ if execute_btn:
             try: requests.post(WEB_APP_URL, data={"date": now.strftime("%Y-%m-%d"), "asset": int(total_asset)})
             except: pass
 
-        # 3년치 글로벌 차트 다운로드
         tickers = [p['ticker'] for p in all_stocks] + ["KRW=X", SAMSUNG_TICKER]
         df_hist = yf.download(tickers, period="3y", progress=False)
 
@@ -336,6 +329,9 @@ if execute_btn:
 if st.session_state.analyzed:
     st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
+    # --- 매수/매도 액션 요약을 띄우기 위한 Placeholder ---
+    action_placeholder = st.empty()
+    
     st.write("🔍 **종목 필터링 (아래 리밸런싱 표에만 적용됩니다)**")
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     if col_f1.button("📋 전체 보기", use_container_width=True): st.session_state.filter_by = "전체"
@@ -351,7 +347,8 @@ if st.session_state.analyzed:
 
     # --- 5-1. 개별 종목표 생성 ---
     stock_rows = []
-    pnl_rows = [] # 손익 디테일 테이블용
+    pnl_rows = [] 
+    actions_needed = [] # 최상단 요약용 알림 리스트
     
     total_buy_cost = 0 
     budget_invest = st.session_state.rebalance_budget * 0.63  
@@ -417,9 +414,14 @@ if st.session_state.analyzed:
         current_ratio = f"{actual_ratio_num:.1%}"
         
         diff = target_qty - my_qty
-        if diff > 0: action = f"🔴 {int(diff)}주 매수"
-        elif diff < 0: action = f"🔵 {int(abs(diff))}주 매도"
-        else: action = "🟢 유지"
+        if diff > 0: 
+            action = f"🔴 {int(diff)}주 매수"
+            actions_needed.append(f"**{get_brand(p['name'])['name']}** {int(diff)}주 매수")
+        elif diff < 0: 
+            action = f"🔵 {int(abs(diff))}주 매도"
+            actions_needed.append(f"**{get_brand(p['name'])['name']}** {int(abs(diff))}주 매도")
+        else: 
+            action = "🟢 유지"
 
         price_display = f"${price_usd:,.2f}" if p['country'] == "US" else "-"
         change_str = f"▲ {change_pct:.2f}%" if change_pct > 0 else (f"▼ {abs(change_pct):.2f}%" if change_pct < 0 else "-")
@@ -451,12 +453,17 @@ if st.session_state.analyzed:
             "수익률(%)": f"{cached['return_pct']:.2f}%"
         })
 
+    # --- 계산 끝났으므로 최상단 알림 업데이트 ---
+    if actions_needed:
+        action_placeholder.warning("🛒 **필요 매수/매도 요약:** " + " | ".join(actions_needed))
+    else:
+        action_placeholder.info("🟢 **매수/매도 신호 없음 (현재 목표 비중 유지중)**")
+
     # [리밸런싱 뷰] 데이터프레임
     df_stocks = pd.DataFrame(stock_rows)
     if st.session_state.filter_by != "전체":
         df_stocks = df_stocks[df_stocks['카테고리'] == st.session_state.filter_by]
     
-    # 요약(합계) 행을 위한 계산
     sum_actual_amt = df_stocks['실제금액숫자'].sum()
     sum_today_profit = df_stocks['오늘수익숫자'].sum()
     sum_target_ratio = df_stocks['목표비중숫자'].sum()
@@ -479,7 +486,7 @@ if st.session_state.analyzed:
     df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '목표비중숫자', '실제비중숫자', '목표금액숫자', '카테고리'])
     df_stocks = pd.concat([df_stocks, pd.DataFrame([summary_row])], ignore_index=True)
     
-    # [상세 손익 뷰] 데이터프레임 생성 및 카테고리별 요약 계산
+    # [상세 손익 뷰] 카테고리별 요약 계산
     df_pnl = pd.DataFrame(pnl_rows)
     
     cat_summary = {"국장": {"real":0, "unreal":0, "tot":0, "prin":0},
@@ -519,7 +526,7 @@ if st.session_state.analyzed:
     
     df_pnl_sum = pd.DataFrame(pnl_summary_rows)
 
-    # --- 기존 포트폴리오 요약표 ---
+    # --- 기존 포트폴리오 자산군별 현황 요약표 ---
     sum_rows = []
     for code, label in [("US", "🌎 해외주식 총합"), ("KR", "🇰🇷 국내주식 총합"), ("ETF", "🛡️ 현금성ETF 총합")]:
         c_cur = st.session_state.cat_stats[code]
@@ -623,16 +630,30 @@ if st.session_state.analyzed:
     st.dataframe(
         df_pnl.style.map(style_profit_val, subset=['실현수익', '미실현수익', '총수익', '수익률(%)'])
               .set_properties(**{'text-align': 'center'}),
-        hide_index=True, use_container_width=True
+        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
+        hide_index=True, use_container_width=False, height=650 
     )
     
+    st.write("---")
+    st.subheader("📋 포트폴리오 자산군별 현황 요약")
+    st.dataframe(
+        df_summary.style.apply(style_summary_dataframe, axis=1)
+                  .map(style_change_color, subset=['등락률', '오늘수익'])
+                  .map(style_d1_color, subset=['D-1'])
+                  .set_properties(**{'text-align': 'center'}),
+        column_order=["종목", "현재가($)", "현재가(₩)", "D-1", "등락률", "오늘수익", "목표비중", "실제비중", "목표금액", "실제금액", "목표수량", "내보유", "실행"],
+        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
+        hide_index=True, use_container_width=False, height=250 
+    )
+
     st.write("---")
     st.subheader("📊 자산군별 손익 요약")
     st.dataframe(
         df_pnl_sum.style.apply(style_summary_dataframe, axis=1)
                   .map(style_profit_val, subset=['실현수익', '미실현수익', '총수익', '수익률(%)'])
                   .set_properties(**{'text-align': 'center'}),
-        hide_index=True, use_container_width=True
+        column_config={"구분": st.column_config.TextColumn("구분", width=110)},
+        hide_index=True, use_container_width=False, height=200
     )
 
     # ==========================================
