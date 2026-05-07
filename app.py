@@ -326,6 +326,17 @@ if execute_btn:
 # ==========================================
 # 5. 화면 출력부 (개별/요약표 및 차트)
 # ==========================================
+
+def fmt_pnl(val):
+    if val > 0: return f"▲ {val:,.0f}원"
+    elif val < 0: return f"▼ {abs(val):,.0f}원"
+    return "0원"
+
+def fmt_pct(val):
+    if val > 0: return f"▲ {val:.2f}%"
+    elif val < 0: return f"▼ {abs(val):.2f}%"
+    return "0.00%"
+
 if st.session_state.analyzed:
     # --- 매수/매도 액션 요약을 띄우기 위한 Placeholder ---
     action_placeholder = st.empty()
@@ -347,7 +358,7 @@ if st.session_state.analyzed:
     # --- 5-1. 개별 종목표 생성 ---
     stock_rows = []
     pnl_rows = [] 
-    actions_needed = [] # 최상단 요약용 알림 리스트
+    actions_needed = [] 
     
     total_buy_cost = 0 
     budget_invest = st.session_state.rebalance_budget * 0.63  
@@ -363,7 +374,7 @@ if st.session_state.analyzed:
         "D-1": sam_prev_change_str, "등락률": sam_change_str, "오늘수익": sam_profit_str,
         "목표비중": "-", "실제비중": f"{sam_actual_ratio_num:.1%}",
         "목표금액": "-", "실제금액": f"{st.session_state.sam_amt:,.0f}원",
-        "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "🔒 매매불가",
+        "목표수량": "-", "내보유": str(SAMSUNG_QTY), "실행": "매매불가",
         "등락률숫자": st.session_state.sam_change, "실제금액숫자": st.session_state.sam_amt, "오늘수익숫자": st.session_state.sam_profit,
         "목표비중숫자": 0.0, "실제비중숫자": sam_actual_ratio_num, "목표금액숫자": 0.0,
         "카테고리": "국장" 
@@ -376,12 +387,16 @@ if st.session_state.analyzed:
         "현재가(₩)": f"{st.session_state.sam_price:,.0f}원",
         "평균단가(₩)": f"{st.session_state.sam_avg_price:,.0f}원",
         "실제평단가(₩)": f"{st.session_state.sam_actual_avg_p:,.0f}원",
-        "실현수익": f"{st.session_state.sam_real_p:,.0f}원",
-        "미실현수익": f"{st.session_state.sam_unreal_p:,.0f}원",
-        "총수익": f"{st.session_state.sam_tot_p:,.0f}원",
+        "실현수익": fmt_pnl(st.session_state.sam_real_p),
+        "미실현수익": fmt_pnl(st.session_state.sam_unreal_p),
+        "총수익": fmt_pnl(st.session_state.sam_tot_p),
         "원금(투입분)": f"{st.session_state.sam_principal:,.0f}원",
-        "수익률(%)": f"{st.session_state.sam_return_pct:.2f}%",
-        "수익률숫자": st.session_state.sam_return_pct
+        "수익률(%)": fmt_pct(st.session_state.sam_return_pct),
+        "수익률숫자": st.session_state.sam_return_pct,
+        "real_num": st.session_state.sam_real_p,
+        "unreal_num": st.session_state.sam_unreal_p,
+        "tot_num": st.session_state.sam_tot_p,
+        "prin_num": st.session_state.sam_principal
     })
 
     for i, p in enumerate(all_stocks):
@@ -415,13 +430,13 @@ if st.session_state.analyzed:
         
         diff = target_qty - my_qty
         if diff > 0: 
-            action = f"🔴 {int(diff)}주 매수"
-            actions_needed.append(f"**{get_brand(p['name'])['name']}** {int(diff)}주 매수")
+            action = f"{int(diff)}주 매수"
+            actions_needed.append(f"**{get_brand(p['name'])['name']}** <span style='color:#1976D2; font-weight:bold;'>{int(diff)}주 매수</span>")
         elif diff < 0: 
-            action = f"🔵 {int(abs(diff))}주 매도"
-            actions_needed.append(f"**{get_brand(p['name'])['name']}** {int(abs(diff))}주 매도")
+            action = f"{int(abs(diff))}주 매도"
+            actions_needed.append(f"**{get_brand(p['name'])['name']}** <span style='color:#D32F2F; font-weight:bold;'>{int(abs(diff))}주 매도</span>")
         else: 
-            action = "🟢 유지"
+            action = "유지"
 
         price_display = f"${price_usd:,.2f}" if p['country'] == "US" else "-"
         change_str = f"▲ {change_pct:.2f}%" if change_pct > 0 else (f"▼ {abs(change_pct):.2f}%" if change_pct < 0 else "-")
@@ -446,19 +461,24 @@ if st.session_state.analyzed:
             "현재가(₩)": f"{price_krw:,.0f}원",
             "평균단가(₩)": f"{cached['avg_p']:,.0f}원",
             "실제평단가(₩)": f"{cached['actual_avg_p']:,.0f}원",
-            "실현수익": f"{cached['real_p']:,.0f}원",
-            "미실현수익": f"{cached['unreal_p']:,.0f}원",
-            "총수익": f"{cached['tot_p']:,.0f}원",
+            "실현수익": fmt_pnl(cached['real_p']),
+            "미실현수익": fmt_pnl(cached['unreal_p']),
+            "총수익": fmt_pnl(cached['tot_p']),
             "원금(투입분)": f"{cached['principal']:,.0f}원",
-            "수익률(%)": f"{cached['return_pct']:.2f}%",
-            "수익률숫자": cached['return_pct']
+            "수익률(%)": fmt_pct(cached['return_pct']),
+            "수익률숫자": cached['return_pct'],
+            "real_num": cached['real_p'],
+            "unreal_num": cached['unreal_p'],
+            "tot_num": cached['tot_p'],
+            "prin_num": cached['principal']
         })
 
-    # --- 계산 끝났으므로 최상단 알림 업데이트 ---
+    # --- 최상단 알림(Placeholder) 업데이트 ---
     if actions_needed:
-        action_placeholder.warning("🛒 **필요 매수/매도 요약:** " + " | ".join(actions_needed))
+        summary_html = "**필요 매수/매도 요약:** &nbsp; " + " &nbsp;|&nbsp; ".join(actions_needed)
+        action_placeholder.markdown(summary_html, unsafe_allow_html=True)
     else:
-        action_placeholder.info("🟢 **매수/매도 신호 없음 (현재 목표 비중 유지중)**")
+        action_placeholder.markdown("**매수/매도 신호 없음 (현재 목표 비중 유지중)**", unsafe_allow_html=True)
 
     # [리밸런싱 뷰] 데이터프레임
     df_stocks = pd.DataFrame(stock_rows)
@@ -494,10 +514,10 @@ if st.session_state.analyzed:
                    
     for row in pnl_rows:
         c = row['카테고리']
-        cat_summary[c]["real"] += float(row['실현수익'].replace('원', '').replace(',', ''))
-        cat_summary[c]["unreal"] += float(row['미실현수익'].replace('원', '').replace(',', ''))
-        cat_summary[c]["tot"] += float(row['총수익'].replace('원', '').replace(',', ''))
-        cat_summary[c]["prin"] += float(row['원금(투입분)'].replace('원', '').replace(',', ''))
+        cat_summary[c]["real"] += row["real_num"]
+        cat_summary[c]["unreal"] += row["unreal_num"]
+        cat_summary[c]["tot"] += row["tot_num"]
+        cat_summary[c]["prin"] += row["prin_num"]
         
     combined_pnl_rows = []
     for cat in ["국장", "미장", "현금성"]:
@@ -505,7 +525,11 @@ if st.session_state.analyzed:
         cat_items.sort(key=lambda x: x["수익률숫자"], reverse=True)
         
         for item in cat_items:
-            del item["수익률숫자"] # 숨김 데이터 삭제
+            del item["수익률숫자"]
+            del item["real_num"]
+            del item["unreal_num"]
+            del item["tot_num"]
+            del item["prin_num"]
             combined_pnl_rows.append(item)
             
         s = cat_summary[cat]
@@ -513,11 +537,11 @@ if st.session_state.analyzed:
         combined_pnl_rows.append({
             "종목": f"📊 [{cat}] 요약",
             "보유수량": "-", "현재가(₩)": "-", "평균단가(₩)": "-", "실제평단가(₩)": "-",
-            "실현수익": f"{s['real']:,.0f}원",
-            "미실현수익": f"{s['unreal']:,.0f}원",
-            "총수익": f"{s['tot']:,.0f}원",
+            "실현수익": fmt_pnl(s['real']),
+            "미실현수익": fmt_pnl(s['unreal']),
+            "총수익": fmt_pnl(s['tot']),
             "원금(투입분)": f"{s['prin']:,.0f}원",
-            "수익률(%)": f"{pct:.2f}%"
+            "수익률(%)": fmt_pct(pct)
         })
         
     tot_s = {k: sum(cat_summary[cat][k] for cat in ["국장", "미장", "현금성"]) for k in ["real", "unreal", "tot", "prin"]}
@@ -525,15 +549,14 @@ if st.session_state.analyzed:
     combined_pnl_rows.append({
         "종목": "📊 전체 자산 총합 요약",
         "보유수량": "-", "현재가(₩)": "-", "평균단가(₩)": "-", "실제평단가(₩)": "-",
-        "실현수익": f"{tot_s['real']:,.0f}원",
-        "미실현수익": f"{tot_s['unreal']:,.0f}원",
-        "총수익": f"{tot_s['tot']:,.0f}원",
+        "실현수익": fmt_pnl(tot_s['real']),
+        "미실현수익": fmt_pnl(tot_s['unreal']),
+        "총수익": fmt_pnl(tot_s['tot']),
         "원금(투입분)": f"{tot_s['prin']:,.0f}원",
-        "수익률(%)": f"{tot_pct:.2f}%"
+        "수익률(%)": fmt_pct(tot_pct)
     })
     
     df_pnl = pd.DataFrame(combined_pnl_rows)
-    # 렌더링 시 필요없는 카테고리 열 삭제 (이미 정렬/요약됨)
     if '카테고리' in df_pnl.columns:
         df_pnl = df_pnl.drop(columns=['카테고리'])
 
@@ -596,16 +619,14 @@ if st.session_state.analyzed:
 
     def style_text_color(val):
         color = 'black'
-        if '매수' in str(val): color = '#D32F2F'
-        elif '매도' in str(val): color = '#1976D2'
+        if '매수' in str(val): color = '#1976D2'  # Blue for Buy
+        elif '매도' in str(val): color = '#D32F2F' # Red for Sell
         return f'color: {color}; font-weight: bold;'
 
     def style_profit_val(val):
-        try:
-            v = float(str(val).replace('원','').replace('%','').replace(',',''))
-            if v > 0: return 'color: #2E7D32; font-weight: bold;'
-            elif v < 0: return 'color: #C2185B; font-weight: bold;'
-        except: pass
+        val_str = str(val)
+        if '▲' in val_str: return 'color: #2E7D32; font-weight: bold;'
+        elif '▼' in val_str: return 'color: #C2185B; font-weight: bold;'
         return ''
 
     def style_stock_dataframe(row):
@@ -837,23 +858,55 @@ if st.session_state.analyzed:
             st.warning("차트 데이터를 불러오는 데 일시적인 문제가 발생했습니다.")
 
     with col_pie:
-        st.subheader("🍕 현재 자산 구성 비율")
+        st.subheader("🍕 자산 구성 비율")
+        tab_pie_current, tab_pie_target = st.tabs(["📊 현재 비율", "🎯 목표 비율"])
+        
         try:
-            pie_data = []
-            if st.session_state.sam_amt > 0: 
-                pie_data.append({"종목": get_brand("삼성전자")["name"], "금액": st.session_state.sam_amt})
-            for i, p in enumerate(all_stocks):
-                if st.session_state.stock_data_cache[i]['my_amt'] > 0:
-                    pie_data.append({"종목": get_brand(p['name'])["name"], "금액": st.session_state.stock_data_cache[i]['my_amt']})
-            if st.session_state.input_cash > 0: 
-                pie_data.append({"종목": get_brand("예수금")["name"], "금액": st.session_state.input_cash})
-
-            df_pie = pd.DataFrame(pie_data)
             custom_colors = {v["name"]: v["color"] for v in brand_meta.values()}
+            
+            # --- 현재 비율 ---
+            with tab_pie_current:
+                pie_data_cur = []
+                if st.session_state.sam_amt > 0: 
+                    pie_data_cur.append({"종목": get_brand("삼성전자")["name"], "금액": st.session_state.sam_amt})
+                for i, p in enumerate(all_stocks):
+                    if st.session_state.stock_data_cache[i]['my_amt'] > 0:
+                        pie_data_cur.append({"종목": get_brand(p['name'])["name"], "금액": st.session_state.stock_data_cache[i]['my_amt']})
+                if st.session_state.input_cash > 0: 
+                    pie_data_cur.append({"종목": get_brand("예수금")["name"], "금액": st.session_state.input_cash})
 
-            fig_pie = px.pie(df_pie, values='금액', names='종목', color='종목', color_discrete_map=custom_colors, hole=0.4)
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pie.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=530, showlegend=False) 
-            st.plotly_chart(fig_pie, use_container_width=True)
+                df_pie_cur = pd.DataFrame(pie_data_cur)
+                fig_pie_cur = px.pie(df_pie_cur, values='금액', names='종목', color='종목', color_discrete_map=custom_colors, hole=0.4)
+                fig_pie_cur.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_cur.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=500, showlegend=False) 
+                st.plotly_chart(fig_pie_cur, use_container_width=True)
+            
+            # --- 목표 비율 ---
+            with tab_pie_target:
+                pie_data_tgt = []
+                reb_budget = st.session_state.rebalance_budget
+                bud_invest = reb_budget * 0.63
+                
+                if st.session_state.sam_amt > 0: 
+                    pie_data_tgt.append({"종목": get_brand("삼성전자")["name"], "금액": st.session_state.sam_amt})
+                
+                for i, p in enumerate(all_stocks):
+                    if i < 5:
+                        tgt_amt = reb_budget * p['ratio']
+                    else:
+                        tgt_amt = bud_invest * p['ratio']
+                    if tgt_amt > 0:
+                        pie_data_tgt.append({"종목": get_brand(p['name'])["name"], "금액": tgt_amt})
+                
+                tgt_cash = reb_budget * 0.21
+                if tgt_cash > 0:
+                    pie_data_tgt.append({"종목": get_brand("예수금")["name"], "금액": tgt_cash})
+                
+                df_pie_tgt = pd.DataFrame(pie_data_tgt)
+                fig_pie_tgt = px.pie(df_pie_tgt, values='금액', names='종목', color='종목', color_discrete_map=custom_colors, hole=0.4)
+                fig_pie_tgt.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie_tgt.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=500, showlegend=False) 
+                st.plotly_chart(fig_pie_tgt, use_container_width=True)
+                
         except Exception as e:
             st.warning("비율 데이터를 표시할 수 없습니다.")
