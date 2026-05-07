@@ -327,10 +327,9 @@ if execute_btn:
 # 5. 화면 출력부 (개별/요약표 및 차트)
 # ==========================================
 if st.session_state.analyzed:
-    st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
-    
     # --- 매수/매도 액션 요약을 띄우기 위한 Placeholder ---
     action_placeholder = st.empty()
+    st.success(f"**📊 현재 포트폴리오 총 자산:** {st.session_state.total_asset:,.0f}원")
     
     st.write("🔍 **종목 필터링 (아래 리밸런싱 표에만 적용됩니다)**")
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
@@ -381,7 +380,8 @@ if st.session_state.analyzed:
         "미실현수익": f"{st.session_state.sam_unreal_p:,.0f}원",
         "총수익": f"{st.session_state.sam_tot_p:,.0f}원",
         "원금(투입분)": f"{st.session_state.sam_principal:,.0f}원",
-        "수익률(%)": f"{st.session_state.sam_return_pct:.2f}%"
+        "수익률(%)": f"{st.session_state.sam_return_pct:.2f}%",
+        "수익률숫자": st.session_state.sam_return_pct
     })
 
     for i, p in enumerate(all_stocks):
@@ -450,7 +450,8 @@ if st.session_state.analyzed:
             "미실현수익": f"{cached['unreal_p']:,.0f}원",
             "총수익": f"{cached['tot_p']:,.0f}원",
             "원금(투입분)": f"{cached['principal']:,.0f}원",
-            "수익률(%)": f"{cached['return_pct']:.2f}%"
+            "수익률(%)": f"{cached['return_pct']:.2f}%",
+            "수익률숫자": cached['return_pct']
         })
 
     # --- 계산 끝났으므로 최상단 알림 업데이트 ---
@@ -486,9 +487,7 @@ if st.session_state.analyzed:
     df_stocks = df_stocks.sort_values(by=st.session_state.sort_by, ascending=False).drop(columns=['등락률숫자', '실제금액숫자', '오늘수익숫자', '목표비중숫자', '실제비중숫자', '목표금액숫자', '카테고리'])
     df_stocks = pd.concat([df_stocks, pd.DataFrame([summary_row])], ignore_index=True)
     
-    # [상세 손익 뷰] 카테고리별 요약 계산
-    df_pnl = pd.DataFrame(pnl_rows)
-    
+    # [상세 손익 뷰] 카테고리별 정렬 및 요약행 삽입
     cat_summary = {"국장": {"real":0, "unreal":0, "tot":0, "prin":0},
                    "미장": {"real":0, "unreal":0, "tot":0, "prin":0},
                    "현금성": {"real":0, "unreal":0, "tot":0, "prin":0}}
@@ -500,31 +499,43 @@ if st.session_state.analyzed:
         cat_summary[c]["tot"] += float(row['총수익'].replace('원', '').replace(',', ''))
         cat_summary[c]["prin"] += float(row['원금(투입분)'].replace('원', '').replace(',', ''))
         
-    pnl_summary_rows = []
+    combined_pnl_rows = []
     for cat in ["국장", "미장", "현금성"]:
+        cat_items = [row for row in pnl_rows if row["카테고리"] == cat]
+        cat_items.sort(key=lambda x: x["수익률숫자"], reverse=True)
+        
+        for item in cat_items:
+            del item["수익률숫자"] # 숨김 데이터 삭제
+            combined_pnl_rows.append(item)
+            
         s = cat_summary[cat]
         pct = (s["tot"] / s["prin"] * 100) if s["prin"] > 0 else 0
-        pnl_summary_rows.append({
-            "구분": f"[{cat}] 요약",
+        combined_pnl_rows.append({
+            "종목": f"📊 [{cat}] 요약",
+            "보유수량": "-", "현재가(₩)": "-", "평균단가(₩)": "-", "실제평단가(₩)": "-",
             "실현수익": f"{s['real']:,.0f}원",
             "미실현수익": f"{s['unreal']:,.0f}원",
             "총수익": f"{s['tot']:,.0f}원",
-            "총원금(투입분)": f"{s['prin']:,.0f}원",
+            "원금(투입분)": f"{s['prin']:,.0f}원",
             "수익률(%)": f"{pct:.2f}%"
         })
-    
+        
     tot_s = {k: sum(cat_summary[cat][k] for cat in ["국장", "미장", "현금성"]) for k in ["real", "unreal", "tot", "prin"]}
     tot_pct = (tot_s["tot"] / tot_s["prin"] * 100) if tot_s["prin"] > 0 else 0
-    pnl_summary_rows.append({
-        "구분": "📊 전체 자산 요약",
+    combined_pnl_rows.append({
+        "종목": "📊 전체 자산 총합 요약",
+        "보유수량": "-", "현재가(₩)": "-", "평균단가(₩)": "-", "실제평단가(₩)": "-",
         "실현수익": f"{tot_s['real']:,.0f}원",
         "미실현수익": f"{tot_s['unreal']:,.0f}원",
         "총수익": f"{tot_s['tot']:,.0f}원",
-        "총원금(투입분)": f"{tot_s['prin']:,.0f}원",
+        "원금(투입분)": f"{tot_s['prin']:,.0f}원",
         "수익률(%)": f"{tot_pct:.2f}%"
     })
     
-    df_pnl_sum = pd.DataFrame(pnl_summary_rows)
+    df_pnl = pd.DataFrame(combined_pnl_rows)
+    # 렌더링 시 필요없는 카테고리 열 삭제 (이미 정렬/요약됨)
+    if '카테고리' in df_pnl.columns:
+        df_pnl = df_pnl.drop(columns=['카테고리'])
 
     # --- 기존 포트폴리오 자산군별 현황 요약표 ---
     sum_rows = []
@@ -623,19 +634,9 @@ if st.session_state.analyzed:
         column_config={"종목": st.column_config.TextColumn("종목", width=110)},
         hide_index=True, use_container_width=False, height=650 
     )
-
-    st.write("---")
-    st.subheader("💰 종목별 손익 및 실제 평단가 현황")
-    st.caption("※ **실제평단가** = 평균단가 - (실현수익 / 보유수량) | **원금** = 현재가치 - 총수익")
-    st.dataframe(
-        df_pnl.style.map(style_profit_val, subset=['실현수익', '미실현수익', '총수익', '수익률(%)'])
-              .set_properties(**{'text-align': 'center'}),
-        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
-        hide_index=True, use_container_width=False, height=650 
-    )
     
     st.write("---")
-    st.subheader("📋 포트폴리오 자산군별 현황 요약")
+    st.subheader("📋 포트폴리오 자산군별 현황 요약 (오늘수익 등락 기준)")
     st.dataframe(
         df_summary.style.apply(style_summary_dataframe, axis=1)
                   .map(style_change_color, subset=['등락률', '오늘수익'])
@@ -647,13 +648,14 @@ if st.session_state.analyzed:
     )
 
     st.write("---")
-    st.subheader("📊 자산군별 손익 요약")
+    st.subheader("💰 종목별 손익 및 실제 평단가 현황 (카테고리별 수익률 정렬)")
+    st.caption("※ **실제평단가** = 평균단가 - (실현수익 / 보유수량) | **원금** = 현재가치 - 총수익")
     st.dataframe(
-        df_pnl_sum.style.apply(style_summary_dataframe, axis=1)
-                  .map(style_profit_val, subset=['실현수익', '미실현수익', '총수익', '수익률(%)'])
-                  .set_properties(**{'text-align': 'center'}),
-        column_config={"구분": st.column_config.TextColumn("구분", width=110)},
-        hide_index=True, use_container_width=False, height=200
+        df_pnl.style.apply(style_stock_dataframe, axis=1)
+              .map(style_profit_val, subset=['실현수익', '미실현수익', '총수익', '수익률(%)'])
+              .set_properties(**{'text-align': 'center'}),
+        column_config={"종목": st.column_config.TextColumn("종목", width=110)},
+        hide_index=True, use_container_width=False, height=750 
     )
 
     # ==========================================
