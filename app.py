@@ -324,8 +324,9 @@ if execute_btn:
 # 5. 화면 출력부 및 공통 설정
 # ==========================================
 
-# 표 정렬을 위한 Styler 파이프라인 함수 (금액=우측, 글자=중앙)
-def apply_alignments(styler, df):
+# 표 정렬을 위한 Styler 파이프라인 함수 (수정됨: DataFrame 추출 오류 수정)
+def apply_alignments(styler):
+    df = styler.data
     text_cols = [c for c in df.columns if c in ["실행", "종목", "구분"]]
     num_cols = [c for c in df.columns if c not in text_cols]
     
