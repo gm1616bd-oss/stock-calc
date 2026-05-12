@@ -33,15 +33,15 @@ fixed_portfolio = [
 
 invest_portfolio = [
     {"name": "TSM",        "ticker": "TSM",    "ratio": 0.25, "country": "US"},
-    {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.08, "country": "US"},
+    {"name": "NVDA",       "ticker": "NVDA",   "ratio": 0.075, "country": "US"},
     {"name": "TSLA",       "ticker": "TSLA",   "ratio": 0.06, "country": "US"},
     {"name": "MSFT",       "ticker": "MSFT",   "ratio": 0.065, "country": "US"},
-    {"name": "AAPL",       "ticker": "AAPL",   "ratio": 0.065, "country": "US"},
+    {"name": "AAPL",       "ticker": "AAPL",   "ratio": 0.06, "country": "US"},
     {"name": "GOOGL",      "ticker": "GOOGL",  "ratio": 0.10, "country": "US"},
     {"name": "AMD",        "ticker": "AMD",    "ratio": 0.065, "country": "US"},
     {"name": "AMZN",       "ticker": "AMZN",   "ratio": 0.065, "country": "US"},
     {"name": "SK하이닉스", "ticker": "000660.KS", "ratio": 0.20, "country": "KR"},
-    {"name": "현대차",     "ticker": "005380.KS", "ratio": 0.05, "country": "KR"},
+    {"name": "현대차",     "ticker": "005380.KS", "ratio": 0.06, "country": "KR"},
 ]
 
 all_stocks = fixed_portfolio + invest_portfolio
