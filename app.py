@@ -395,7 +395,7 @@ if st.session_state.analyzed:
     total_buy_cost = 0
     
     reb_budget = st.session_state.rebalance_budget
-    budget_invest = reb_budget * 0.63  
+    budget_invest = reb_budget * 0.65
     exc_rate = st.session_state.exc_rate
 
     sam_change_str = f"▲ {st.session_state.sam_change:.2f}%" if st.session_state.sam_change > 0 else (f"▼ {abs(st.session_state.sam_change):.2f}%" if st.session_state.sam_change < 0 else "-")
