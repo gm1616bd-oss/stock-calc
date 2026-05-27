@@ -655,7 +655,7 @@ if st.session_state.analyzed:
     
     sum_rows.append({
         "종목": get_brand("예수금")["name"], "D-1": "-", "등락률": "-", "오늘수익": "-",
-        "목표비중": "21.0%", "실제비중": f"{(st.session_state.input_cash / st.session_state.total_asset):.1%}",
+        "목표비중": "19.0%", "실제비중": f"{(st.session_state.input_cash / st.session_state.total_asset):.1%}",
         "목표금액": f"₩{tgt_Cash:,.0f}", "실제금액": f"₩{st.session_state.input_cash:,.0f}"
     })
 
@@ -967,7 +967,7 @@ if st.session_state.analyzed:
                     if tgt_amt > 0:
                         pie_data_tgt.append({"종목": get_brand(p['name'])["name"], "금액": tgt_amt})
                 
-                tgt_cash = reb_budget * 0.21
+                tgt_cash = reb_budget * 0.19
                 if tgt_cash > 0:
                     pie_data_tgt.append({"종목": get_brand("예수금")["name"], "금액": tgt_cash})
                 
